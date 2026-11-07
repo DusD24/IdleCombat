@@ -1,0 +1,5 @@
+.DS_Store
+dist/bundle_check.js
+footage/
+node_modules/
+HANDOFF.md

@@ -1,0 +1,92 @@
+<div id="app">
+  <header class="topbar">
+    <div class="brand">Breach Squad</div>
+    <div class="lvlbox"><div id="lvlName">Level 1</div><div id="pips"></div></div>
+    <div class="cash" id="cash" aria-label="Cash">$0</div>
+    <button class="iconbtn" id="sndBtn" type="button" aria-label="Sound" aria-pressed="true">
+      <svg viewBox="0 0 24 24"><path d="M4 9h4l5-4v14l-5-4H4z"/><path class="wave" d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/><path class="x" d="M17 9l5 6M22 9l-5 6"/></svg>
+    </button>
+    <button class="iconbtn" id="menuBtn" type="button" aria-label="Menu">
+      <svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </button>
+    <div id="menu" hidden>
+      <button type="button" id="howBtn">How to play</button>
+      <button type="button" id="resetBtn">Start over</button>
+    </div>
+  </header>
+  <div class="main">
+    <div id="stage">
+      <div id="field">
+        <canvas id="cv" aria-label="Battlefield. Tap a deployment square to change its squad."></canvas>
+        <div class="wallbar"><div class="lbl"><span id="wallName">Wall</span><span id="wallHp"></span></div><div class="track"><div id="wallFill"></div></div></div>
+        <div class="hud">
+          <div class="forming"><span class="k" id="formLbl">Wave 1 forming</span><span class="v" id="formVal">0/4 squads</span><div class="formbar"><div id="formFill"></div></div></div>
+          <div class="armybox" id="armyBox"><span class="k" id="armyLbl">Army</span><span class="v" id="armyVal">0/40</span></div>
+          <div class="last"><span class="k">Last wave</span><span class="v"><span id="lastDmg">–</span> <span class="delta" id="lastDelta"></span></span></div>
+        </div>
+        <div id="feed" aria-live="polite"></div>
+        <div id="banner" hidden><div class="big" id="bannerBig">Breached!</div><div class="sub" id="bannerSub"></div></div>
+        <div id="pausedTag" hidden>Paused</div>
+      </div>
+    </div>
+    <aside class="dock" id="dock" aria-label="Command">
+      <div class="scroll" id="dockScroll"></div>
+      <div class="bar">
+        <button class="btn2" id="lineupBtn" type="button">Lineup</button>
+        <button class="btn2" id="squadsBtn" type="button">Upgrades</button>
+        <button class="btn2" id="sendBtn" type="button" title="Send the squads that are ready now">Send now</button>
+        <button class="btn2 icon" id="pauseBtn" type="button" aria-label="Pause" aria-pressed="false"><svg class="pause" viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></svg><svg class="play" viewBox="0 0 24 24"><path d="M7 5l12 7-12 7z"/></svg></button>
+        <button class="btn2 spd" id="spdBtn" type="button" aria-label="Game speed">1×</button>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<div id="lineup">
+  <div class="sechead"><div id="secTitle">Section 1</div><span class="lbl-k red">Enemy</span></div>
+  <div id="intel"></div>
+  <div id="intelTip"></div>
+  <div class="gridhead"><span class="lbl-k blue">Your lineup</span><span class="s">Changes apply to the next squads trained</span></div>
+  <div id="grid"></div>
+  <div class="chartwrap">
+    <div class="gridhead"><span class="lbl-k y">Siege damage per wave</span><span class="s">first 45s of each wave · striped = in progress</span></div>
+    <div id="hist"></div>
+    <div id="est"></div>
+  </div>
+</div>
+
+<div id="lineupSheet" class="sheet" hidden>
+  <div class="card" role="dialog" aria-label="Lineup">
+    <div class="sheethead"><h2>Lineup</h2><button class="iconbtn" id="lineupClose" type="button" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+    <div class="body" id="lineupBody"></div>
+  </div>
+</div>
+
+<div id="sheet" class="sheet dim" hidden>
+  <div class="card" role="dialog" aria-label="Squads">
+    <div class="sheethead"><div id="sheetHead"></div><span id="sheetCash"></span><button class="iconbtn" id="sheetClose" type="button" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+    <div id="sheetList"></div>
+  </div>
+</div>
+
+<div id="how" hidden>
+  <div class="card" role="dialog" aria-labelledby="howTitle">
+    <h2 id="howTitle">Breach Squad</h2>
+    <p class="tagline">Your barracks never stop. Squads train, line up, and charge the wall in waves.</p>
+    <ol>
+      <li>Each square in your <b>lineup</b> is a squad. Its barracks trains it and the troops run to that square.</li>
+      <li>When every square is filled, the wave <b>launches on its own</b>. The barracks start the next wave right away.</li>
+      <li>The enemy sends its own waves too. Watch who wins, then change your lineup while the fight is still going. The next wave uses the new plan.</li>
+      <li>Troops stay and fight until they're knocked out. When your army hits its limit, the barracks wait.</li>
+      <li>Each wave's <b>siege damage</b> over its first 45 seconds is charted. Beat your last wave and the wall falls sooner.</li>
+    </ol>
+    <div class="counters">
+      <div><b>Rushers</b> → Riot Shields in front, guns behind</div>
+      <div><b>Heavies</b> → Juggernaut to soak, RPGs or a Sniper</div>
+      <div><b>Bunkers &amp; trucks</b> → RPGs, Mortars, C4</div>
+      <div><b>Snipers &amp; wall gunmen</b> → Grenadiers, Mortar, Sniper</div>
+    </div>
+    <button class="cta" id="howClose" type="button">Let's go</button>
+  </div>
+</div>
+<div id="toast" hidden></div>

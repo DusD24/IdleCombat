@@ -14,7 +14,8 @@ const TRAIN_MULT = 1.2;          // multiplier on our training times
 const ENEMY_CAP_WAVES = 1.6;   // the enemy keeps at most this many waves' worth of troops on the field
 const TRAIN = { rifle: 7, shield: 8, saw: 10, rpg: 10, gren: 10, jugg: 14, sniper: 10, medic: 8, breacher: 10, mortar: 12, humvee: 14 };
 const LINES = 2;               // squads each barracks can train at once
-const WALL_MULT = 3;           // walls are tougher because waves overlap
+const WALL_MULT = 22;          // tuned so a section takes ~3-6 min (Idle Siege lines take ~5 min; see analysis/FINDINGS.md)
+const SIEGE_CASH = .3;         // cash per point of wall damage = SIEGE_CASH / WALL_MULT, so a whole wall pays the same however tough it is
 function trainTime(k, lv) { return TRAIN[k] * TRAIN_MULT * Math.max(.55, 1 - .04 * ((lv || 1) - 1)); }
 
 // damage type x armor class
@@ -128,7 +129,7 @@ const WALL_GUN_TIP = 'Behind cover on the wall: bullets do much less. Grenades a
 // field: list of [enemyKey, count]; wallGuns: count; towers: sniper count; bunkers: count
 const LEVELS = [
   { name: 'Dusty Outpost', theme: 'sand', scale: 1, sections: [
-    { name: 'Sandbag Line', wall: 'sandbag', hp: 800, wallGuns: 3, field: [['gunman', 4]], reinf: [14, [['gunman', 2]]] },
+    { name: 'Sandbag Line', wall: 'sandbag', hp: 450, wallGuns: 3, field: [['gunman', 4]], reinf: [14, [['gunman', 2]]] },
     { name: 'Rusher Gate', wall: 'sandbag', hp: 1100, wallGuns: 3, field: [['rusher', 14]], reinf: [11, [['rusher', 4]]] },
     { name: 'Command Tent', wall: 'hq', hp: 1500, wallGuns: 4, field: [['rusher', 6], ['gunman', 4]], reinf: [12, [['rusher', 2], ['gunman', 1]]] },
   ]},
@@ -151,11 +152,11 @@ const LEVELS = [
     { name: 'Harbor HQ', wall: 'hq', hp: 10000, bunkers: 2, wallGuns: 5, field: [['tank', 1], ['heavy', 3], ['erpg', 3]], reinf: [15, [['erpg', 2]]] },
   ]},
   { name: 'Iron Citadel', theme: 'citadel', scale: 1.9, sections: [
-    { name: 'Outer Ring', wall: 'steel', hp: 10000, bunkers: 3, towers: 2, wallGuns: 4, field: [['gunman', 6]], reinf: [13, [['gunman', 3]]] },
-    { name: 'Kill Zone', wall: 'steel', hp: 11000, wallGuns: 4, field: [['rusher', 14], ['heavy', 4]], reinf: [12, [['rusher', 4]]] },
-    { name: 'Armor Gate', wall: 'steel', hp: 12000, wallGuns: 3, field: [['tank', 1], ['erpg', 3], ['technical', 2]], cycle: 20 },
-    { name: 'Citadel Keep', wall: 'steel', hp: 13000, bunkers: 2, towers: 3, wallGuns: 3, field: [['heavy', 4], ['rusher', 8], ['erpg', 2]], reinf: [14, [['rusher', 4]]] },
-    { name: 'Citadel HQ', wall: 'hq', hp: 15000, bunkers: 2, towers: 2, wallGuns: 4, field: [['tank', 1], ['heavy', 3], ['technical', 2], ['rusher', 8]], reinf: [14, [['rusher', 3], ['erpg', 1]]] },
+    { name: 'Outer Ring', wall: 'steel', hp: 8000, bunkers: 3, towers: 2, wallGuns: 4, field: [['gunman', 6]], reinf: [13, [['gunman', 3]]] },
+    { name: 'Kill Zone', wall: 'steel', hp: 8600, wallGuns: 4, field: [['rusher', 14], ['heavy', 4]], reinf: [12, [['rusher', 4]]] },
+    { name: 'Armor Gate', wall: 'steel', hp: 9000, wallGuns: 3, field: [['tank', 1], ['erpg', 3], ['technical', 2]], cycle: 20 },
+    { name: 'Citadel Keep', wall: 'steel', hp: 10400, bunkers: 2, towers: 3, wallGuns: 3, field: [['heavy', 4], ['rusher', 8], ['erpg', 2]], reinf: [14, [['rusher', 4]]] },
+    { name: 'Citadel HQ', wall: 'hq', hp: 11500, bunkers: 2, towers: 2, wallGuns: 4, field: [['tank', 1], ['heavy', 3], ['technical', 2], ['rusher', 8]], reinf: [14, [['rusher', 3], ['erpg', 1]]] },
   ]},
 ];
 const THEMES = ['sand', 'village', 'mountain', 'harbor', 'citadel'];
@@ -177,10 +178,10 @@ function getLevel(idx) {
   while (secs.length < count - 1) {
     const i = Math.floor(r() * SECTION_POOL.length);
     if (used.has(i)) continue; used.add(i);
-    secs.push(Object.assign({}, SECTION_POOL[i], { hp: 9000 + n * 1200 + secs.length * 600 }));
+    secs.push(Object.assign({}, SECTION_POOL[i], { hp: 7600 + n * 900 + secs.length * 450 }));
   }
   const hq = HQ_POOL[Math.floor(r() * HQ_POOL.length)];
-  secs.push(Object.assign({}, hq, { name: 'Op HQ', hp: 13000 + n * 1600 }));
+  secs.push(Object.assign({}, hq, { name: 'Op HQ', hp: 10800 + n * 1200 }));
   return { name: 'Operation ' + OP_NAMES[n % OP_NAMES.length] + (n >= OP_NAMES.length ? ' ' + (Math.floor(n / OP_NAMES.length) + 1) : ''),
     theme: THEMES[Math.floor(r() * THEMES.length)], scale: 1.9 + .25 * (n + 1), sections: secs, endless: true };
 }

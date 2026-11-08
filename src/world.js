@@ -525,7 +525,7 @@ class World {
     if (t.wave) t.wave.contact = true;
     if (src && src.team === 'p' && (t === this.wall || t.def.structure)) {
       if (src.wave) src.wave.dmg += d;
-      this.cash += d * .1;
+      this.cash += d * SIEGE_CASH / WALL_MULT;
       if (d >= 15) this.texts.push({ x: (t === this.wall ? src.x : t.x) + (this.r() - .5) * 16, y: (t === this.wall ? WALL_Y : t.y) - 6, txt: '-' + Math.round(d), life: 1, max: 1, big: d >= 120 });
     }
     if (t !== this.wall && t.hp <= 0) this.kill(t, src);

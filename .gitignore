@@ -2,4 +2,7 @@
 dist/bundle_check.js
 footage/
 node_modules/
+.venv/
+analysis/frames/
+analysis/sheets/
 HANDOFF.md

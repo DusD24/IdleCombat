@@ -89,7 +89,7 @@ const UNITS = {
   sniper: {
     name: 'Sniper', weapon: 'M110 rifle', n: 1, hp: 50, armor: 'light', speed: 32, range: 300, dmg: 100, cd: 2.6,
     dtype: 'ap', ai: 'ap', tier: 3,
-    role: 'Outranges everything. Picks off key targets first.',
+    role: 'Outranges every gun on the field (only the Mortar reaches further). Picks off key targets first.',
     good: 'Enemy snipers, RPG gunmen, Heavies', bad: 'Crowds, Walls'
   },
   medic: {
@@ -130,9 +130,9 @@ const ENEMIES = {
   esniper: { name: 'Snipers', hp: 60, armor: 'light', speed: 0, range: 290, dmg: 80, cd: 3.6, dtype: 'ap', ai: 'snipe', bounty: 10,
     tip: 'On towers, picking off your gunners. Answer with your own Sniper, Grenadiers or a Mortar.' },
   technical: { name: 'Technicals', hp: 520, armor: 'vehicle', speed: 46, range: 150, dmg: 12, cd: .18, dtype: 'hmg', size: 2, vehicle: true, bounty: 20,
-    tip: 'Pickup trucks with a .50 cal. Bullets bounce off. Bring RPGs.' },
+    tip: 'Pickup trucks with a .50 cal. Bullets bounce off: bring RPGs. Knock out their depot to stop new ones.' },
   tank: { name: 'Tanks', hp: 2000, armor: 'vehicle', speed: 15, range: 190, dmg: 80, cd: 3.8, dtype: 'blast', splash: 30, proj: 'cannon', size: 2.7, vehicle: true, bounty: 60,
-    tip: 'Massive armor and a big cannon. Lots of RPGs, C4, or a Juggernaut to distract it.' },
+    tip: 'Massive armor and a big cannon. RPGs kill it and a Juggernaut can soak its shots. C4 can\'t hurt tanks, but Breachers can blow up the depot that builds them.' },
   erpg: { name: 'RPG Gunmen', hp: 55, armor: 'light', speed: 30, range: 165, dmg: 85, cd: 4.2, dtype: 'at', splash: 14, proj: 'rocket', ai: 'at', bounty: 6,
     tip: 'Hunt your vehicles and Juggernauts. A Sniper or Riflemen take them out fast.' },
   ebarracks: { name: 'Barracks', hp: 1, armor: 'building', speed: 0, range: 0, dmg: 0, cd: 1, structure: true, barracks: true, size: 2.6, bounty: 60,
@@ -142,6 +142,11 @@ const ENEMIES = {
   bunker: { name: 'MG Bunkers', hp: 1100, armor: 'fort', speed: 0, range: 160, dmg: 7, cd: .12, dtype: 'bullet', structure: true, size: 2.4, bounty: 80,
     tip: 'Concrete machine-gun nests that stay broken between waves. RPGs, Mortars or C4.' },
 };
+// which of our squads answer each enemy (used for hints), best first
+const COUNTERS = {
+  gunman: ['rifle', 'saw'], rusher: ['shield', 'saw'], heavy: ['jugg', 'rpg', 'sniper'], esniper: ['sniper', 'gren', 'mortar'],
+  technical: ['rpg', 'humvee'], tank: ['rpg', 'jugg'], erpg: ['sniper', 'rifle'], bunker: ['rpg', 'mortar', 'breacher'],
+};
 // wall gunmen are gunmen standing on the wall with cover + extra range
 const WALL_GUN_TIP = 'Behind cover on the wall: bullets do much less. Grenades and mortars ignore cover.';
 
@@ -149,9 +154,10 @@ const WALL_GUN_TIP = 'Behind cover on the wall: bullets do much less. Grenades a
 // field: list of [enemyKey, count]; wallGuns: count; towers: sniper count; bunkers: count
 const LEVELS = [
   { name: 'Dusty Outpost', theme: 'sand', scale: 1, sections: [
-    { name: 'Sandbag Line', wall: 'sandbag', hp: 450, wallGuns: 3, field: [['gunman', 4]], reinf: [14, [['gunman', 2]]] },
+    // the first line teaches one thing with what you start with: Riflemen outrange their Gunmen. Lighter buildings so the first knockout comes early.
+    { name: 'Sandbag Line', wall: 'sandbag', hp: 450, wallGuns: 0, easy: .55, field: [['gunman', 4]], reinf: [14, [['gunman', 2]]] },
     { name: 'Rusher Gate', wall: 'sandbag', hp: 1100, wallGuns: 3, field: [['rusher', 14]], reinf: [11, [['rusher', 4]]] },
-    { name: 'Command Tent', wall: 'hq', hp: 1500, wallGuns: 4, field: [['rusher', 6], ['gunman', 4]], reinf: [12, [['rusher', 2], ['gunman', 1]]] },
+    { name: 'Command Tent', wall: 'hq', hp: 1500, wallGuns: 2, field: [['rusher', 6], ['gunman', 4]], reinf: [12, [['rusher', 2], ['gunman', 1]]] },
   ]},
   { name: 'Checkpoint Bravo', theme: 'village', scale: 1.15, sections: [
     { name: 'Bunker Row', wall: 'concrete', hp: 2600, bunkers: 2, wallGuns: 4, field: [['gunman', 4]], reinf: [14, [['gunman', 2]]] },
@@ -227,7 +233,7 @@ function lineLayout(s) {
     towers: [24, W - 24, W / 2].slice(0, s.towers || 0).map(x => ({ x, y: WALL_Y - 8 })),
   };
 }
-function barracksMaxHp(k, scale) { return Math.round(BARRACKS_HP * scale * (ENEMIES[k].vehicle ? 1.4 : 1)); }
+function barracksMaxHp(k, scale, sec) { return Math.round(BARRACKS_HP * scale * (ENEMIES[k].vehicle ? 1.4 : 1) * (sec && sec.easy || 1)); }
 // enemy strength for a section: grows every section across the campaign and into endless operations
 function sectionScale(levelIdx, secIdx) {
   let g = secIdx;
@@ -236,7 +242,7 @@ function sectionScale(levelIdx, secIdx) {
 }
 function sectionMaxHp(levelIdx, secIdx) {
   const s = getLevel(levelIdx).sections[secIdx];
-  return Math.round(GATE_HP * (s.wall === 'hq' ? 1.5 : 1));
+  return Math.round(GATE_HP * (s.wall === 'hq' ? 1.5 : 1) * (s.easy || 1));
 }
 
 // unit unlocks: [unitKey, levelIdx, sectionsClearedInThatLevel] -> unlocked once progress passes it

@@ -31,11 +31,12 @@ class World {
   // ---------- sections ----------
   loadSection(lvl, sec, gateHp, bunkers, barracks) {
     this.lvl = lvl; this.secIdx = sec; this.level = getLevel(lvl); this.sec = this.level.sections[sec]; this.scale = sectionScale(lvl, sec);
+    this.lineId = lvl + ':' + sec;          // endless operations reuse section names, so history is keyed by position
     this.gateMax = Math.round(sectionMaxHp(lvl, sec) * this.scale);
     this.gateHp0 = gateHp != null && gateHp > 0 ? Math.min(gateHp, this.gateMax) : this.gateMax;
     this.bunkerHp = bunkers && bunkers.length === (this.sec.bunkers || 0) ? bunkers.slice() : Array(this.sec.bunkers || 0).fill(ENEMIES.bunker.hp * this.scale);
     this.barracksDef = sectionBarracks(this.sec);
-    this.barracksHp = barracks && barracks.length === this.barracksDef.length ? barracks.slice() : this.barracksDef.map(([k]) => barracksMaxHp(k, this.scale));
+    this.barracksHp = barracks && barracks.length === this.barracksDef.length ? barracks.slice() : this.barracksDef.map(([k]) => barracksMaxHp(k, this.scale, this.sec));
     for (const u of this.units) {
       if (u.team === 'e') { u.alive = false; this.fx.push({ type: 'puff', x: u.x, y: u.y, vx: 0, vy: -8, life: .8, max: .8, size: 4, c: 'smoke' }); }
       else if (u.phase === 'field' || u.phase === 'charge' || u.phase === 'retreat') u.alive = false;  // they took the old section
@@ -43,7 +44,8 @@ class World {
     this.units = this.units.filter(u => u.alive);
     this.proj = [];
     // waves still out there are finished: they broke through
-    for (const w of this.waves || []) if (!w.reported) this.report(w, true);
+    for (const w of this.waves || []) if (!w.reported) this.report(w, w === this.breachBy, w !== this.breachBy);
+    this.breachBy = null;
     if (this.waves) this.waves = [];
     for (const u of this.units) u.target = null;
     this.spawnStatics();
@@ -65,7 +67,7 @@ class World {
       this.barracks.push(b);
       if (!(this.barracksHp[i] > 0)) return;
       const u = this.mk('e', 'ebarracks', ENEMIES.ebarracks, b.x, b.y, sc, sc);
-      u.maxHp = barracksMaxHp(k, sc); u.hp = this.barracksHp[i]; u.barracksIdx = i; u.trains = k; u.face = Math.PI / 2;
+      u.maxHp = barracksMaxHp(k, sc, s); u.hp = this.barracksHp[i]; u.barracksIdx = i; u.trains = k; u.face = Math.PI / 2;
       b.unit = u;
     });
     L.bunkers.forEach((p, i) => {
@@ -205,9 +207,14 @@ class World {
     s.status = 'walking'; s.prog = 0;
   }
   launch(manual) {
-    const wave = { no: this.waveNo + 1, t0: this.t, dmg: 0, kills: 0, sent: 0, lost: 0, alive: 0, contact: false, march: 99, done: false, manual, sec: this.sec.name };
+    const wave = { no: this.waveNo + 1, t0: this.t, dmg: 0, gateDmg: 0, kills: 0, sent: 0, lost: 0, alive: 0, contact: false, march: 99, done: false, manual, sec: this.lineId };
+    let room = this.armyLimit - this.fieldCount();
+    this.capHeld = 0;
     for (const s of this.slotList()) {
       if (s.status !== 'ready' && s.status !== 'walking') continue;
+      const n = s.units.filter(u => u.alive).length;
+      if (n > room) { this.capHeld += n; continue; }        // army limit is a hard cap: this squad waits for the next wave
+      room -= n;
       for (const u of s.units) {
         if (!u.alive) continue;
         u.phase = 'field'; u.wave = wave; u.slot = null; u.target = null; u.setupT = u.setupT || 0;
@@ -257,7 +264,7 @@ class World {
     this.units = this.units.filter(u => u.alive);
     // wave bookkeeping
     for (const w of this.waves) {
-      if (!w.reported && (w.alive <= 0 || this.t - w.t0 >= REPORT_T)) this.report(w, false);
+      if (!w.reported && !this.breaching && (w.alive <= 0 || this.t - w.t0 >= REPORT_T)) this.report(w, false);
       if (w.alive <= 0) w.done = true;
     }
     this.waves = this.waves.filter(w => !w.done);
@@ -274,9 +281,15 @@ class World {
       }
     }
   }
-  report(w, captured) {
-    w.reported = true; w.captured = captured; w.t1 = this.t;
-    w.rep = { dmg: w.dmg, lost: w.lost, kills: w.kills, sent: w.sent, alive: w.alive, secs: Math.round(this.t - w.t0) };
+  // the line we are about to move to (used to save mid-celebration without reviving the gate)
+  nextLine() {
+    let nl = this.lvl, ns = this.secIdx + 1;
+    if (ns >= this.level.sections.length) { nl++; ns = 0; }
+    return { lvl: nl, sec: ns };
+  }
+  report(w, captured, carried) {
+    w.reported = true; w.captured = !!captured; w.carried = !!carried; w.t1 = this.t;
+    w.rep = { dmg: w.dmg, gate: w.gateDmg || 0, lost: w.lost, kills: w.kills, sent: w.sent, alive: w.alive, secs: Math.round(this.t - w.t0) };
     this.notes.push({ type: 'waveDone', wave: w });
   }
   startBreach() {
@@ -568,8 +581,9 @@ class World {
     if (t.def.structure && this.breaching) return;
     let m = MULT[dtype][t.armor];
     if (t.cover) m *= COVER[dtype];
-    const d = dmg * m;
+    let d = dmg * m;
     if (d <= 0) return;
+    if (t.def.structure) d = Math.min(d, Math.max(0, t.hp));   // no credit or cash for overkill on buildings
     t.hp -= d;
     if (!(t.hurtCd > 0)) { t.hurt = .07; t.hurtCd = .35; }
     if (src && src.wave) src.wave.contact = true;
@@ -578,7 +592,7 @@ class World {
     if (t.def.barracks) this.barracksHp[t.barracksIdx] = Math.max(0, t.hp);
     if (t.bunkerIdx != null) this.bunkerHp[t.bunkerIdx] = Math.max(0, t.hp);
     if (src && src.team === 'p' && t.def.structure) {
-      if (src.wave) src.wave.dmg += d;
+      if (src.wave) { src.wave.dmg += d; if (t.def.gate) src.wave.gateDmg += d; }
       this.cash += d * STRUCT_CASH;
       if (d >= 15) this.texts.push({ x: t.x + (this.r() - .5) * 16, y: t.y - t.r - 4, txt: '-' + Math.round(d), life: 1, max: 1, big: d >= 120 });
     }
@@ -592,6 +606,7 @@ class World {
   kill(t, src, silent) {
     if (!t.alive) return;
     t.alive = false; t.hp = 0;
+    if (t.def.gate && src && src.wave) this.breachBy = src.wave;
     if (t.team === 'e') {
       const b = (t.def.bounty || 3) * this.scale;
       this.cash += b;
@@ -600,7 +615,10 @@ class World {
         this.boomFx(t.x, t.y, 40, true); this.shake = Math.max(this.shake, .5); this.events.push('big');
         const label = t.def.barracks ? 'BARRACKS DOWN' : 'BUNKER DOWN';
         this.texts.push({ x: t.x, y: t.y - 20, txt: label, life: 1.6, max: 1.6, big: true, cash: true });
-        if (t.def.barracks) this.notes.push({ type: 'barracksDown', trains: t.trains, left: this.barracks.filter(b => b.unit && b.unit.alive).length });
+        if (t.def.barracks) {
+          const up = this.barracks.filter(b => b.unit && b.unit.alive);
+          this.notes.push({ type: 'barracksDown', trains: t.trains, left: up.length, sameLeft: up.filter(b => b.k === t.trains).length });
+        }
       }
     } else if (t.wave) { t.wave.lost++; t.wave.alive--; }
     if (!t.def.structure) {

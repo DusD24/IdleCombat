@@ -10,6 +10,7 @@
       <svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
     </button>
     <div id="menu" hidden>
+      <button type="button" id="basesBtn">Bases</button>
       <button type="button" id="howBtn">How to play</button>
       <button type="button" id="resetBtn">Start over</button>
     </div>
@@ -25,6 +26,7 @@
           <div class="armybox" id="armyBox"><span class="k" id="armyLbl">Army</span><span class="v" id="armyVal">0/40</span></div>
           <div class="last"><span class="k">Last wave</span><span class="v"><span id="lastDmg">–</span> <span class="delta" id="lastDelta"></span></span></div>
         </div>
+        <div id="objective" aria-live="polite"><span class="goal"></span><span class="hint"></span></div>
         <div id="feed" aria-live="polite"></div>
         <div id="banner" hidden><div class="big" id="bannerBig">Breached!</div><div class="sub" id="bannerSub"></div></div>
         <div id="pausedTag" hidden>Paused</div>
@@ -76,7 +78,7 @@
     <p class="tagline">Your barracks never stop. Squads train, line up, and storm the enemy base in waves.</p>
     <ol>
       <li>Each square in your <b>lineup</b> is a squad. Its barracks trains it and the troops run to that square.</li>
-      <li>When every square is filled, the wave <b>launches on its own</b>. The barracks start the next wave right away.</li>
+      <li>When every square is filled and your last wave is mostly spent, the next wave <b>launches on its own</b>.</li>
       <li>Every enemy <b>barracks</b> sends a squad on a timer. Beat their wave, then hit their buildings before the next one comes out.</li>
       <li>Building damage <b>stays</b>. Knock out a barracks and every enemy wave after it is smaller.</li>
       <li>Break the <b>gate</b> to clear the line. Change your lineup any time: the next wave uses the new plan.</li>
@@ -88,6 +90,22 @@
       <div><b>Snipers &amp; wall gunmen</b> → Grenadiers, Mortar, Sniper</div>
     </div>
     <button class="cta" id="howClose" type="button">Let's go</button>
+  </div>
+</div>
+<div id="buyCard" class="sheet dim" hidden>
+  <div class="card buycard" role="dialog" aria-labelledby="buyTitle" aria-describedby="buyText">
+    <h2 id="buyTitle">Open a square</h2>
+    <p id="buyText"></p>
+    <div class="buyrow"><button type="button" class="ghostbtn" id="buyCancel">Cancel</button><button type="button" class="cta" id="buyOk">Open</button></div>
+  </div>
+</div>
+<div id="bases" hidden>
+  <div class="card" role="dialog" aria-labelledby="basesTitle">
+    <h2 id="basesTitle">Bases</h2>
+    <p class="tagline" id="basesSub"></p>
+    <div class="vstats" id="vstats" hidden></div>
+    <div id="basesList"></div>
+    <button class="cta" id="basesClose" type="button">Back to battle</button>
   </div>
 </div>
 <div id="toast" hidden></div>

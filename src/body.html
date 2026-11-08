@@ -49,7 +49,7 @@
   <div class="gridhead"><span class="lbl-k blue">Your lineup</span><span class="s">Changes apply to the next squads trained</span></div>
   <div id="grid"></div>
   <div class="chartwrap">
-    <div class="gridhead"><span class="lbl-k y">Siege damage per wave</span><span class="s">first 45s of each wave · striped = in progress</span></div>
+    <div class="gridhead"><span class="lbl-k y">Building damage per wave</span><span class="s">damage to buildings, first 45s · striped = in progress</span></div>
     <div id="hist"></div>
     <div id="est"></div>
   </div>
@@ -72,18 +72,18 @@
 <div id="how" hidden>
   <div class="card" role="dialog" aria-labelledby="howTitle">
     <h2 id="howTitle">Breach Squad</h2>
-    <p class="tagline">Your barracks never stop. Squads train, line up, and charge the wall in waves.</p>
+    <p class="tagline">Your barracks never stop. Squads train, line up, and storm the enemy base in waves.</p>
     <ol>
       <li>Each square in your <b>lineup</b> is a squad. Its barracks trains it and the troops run to that square.</li>
       <li>When every square is filled, the wave <b>launches on its own</b>. The barracks start the next wave right away.</li>
-      <li>The enemy sends its own waves too. Watch who wins, then change your lineup while the fight is still going. The next wave uses the new plan.</li>
-      <li>Troops stay and fight until they're knocked out. When your army hits its limit, the barracks wait.</li>
-      <li>Each wave's <b>siege damage</b> over its first 45 seconds is charted. Beat your last wave and the wall falls sooner.</li>
+      <li>Every enemy <b>barracks</b> sends a squad on a timer. Beat their wave, then hit their buildings before the next one comes out.</li>
+      <li>Building damage <b>stays</b>. Knock out a barracks and every enemy wave after it is smaller.</li>
+      <li>Break the <b>gate</b> to clear the line. Change your lineup any time: the next wave uses the new plan.</li>
     </ol>
     <div class="counters">
       <div><b>Rushers</b> → Riot Shields in front, guns behind</div>
       <div><b>Heavies</b> → Juggernaut to soak, RPGs or a Sniper</div>
-      <div><b>Bunkers &amp; trucks</b> → RPGs, Mortars, C4</div>
+      <div><b>Barracks, bunkers &amp; trucks</b> → RPGs, Mortars, C4</div>
       <div><b>Snipers &amp; wall gunmen</b> → Grenadiers, Mortar, Sniper</div>
     </div>
     <button class="cta" id="howClose" type="button">Let's go</button>

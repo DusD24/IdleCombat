@@ -1,7 +1,9 @@
 // ================= CONTINUOUS WORLD =================
 // Barracks train squads for each deployment square. Trained troops walk to their
 // square and wait. When every assigned square is filled the wave launches and the
-// barracks start on the next one. The enemy sends its own set mixture on a timer.
+// barracks start on the next one. On the enemy side, each enemy barracks trains its
+// squad on a shared timer. Destroyed barracks stay destroyed, so the enemy waves shrink.
+// The section is cleared when the gate falls.
 let UID = 0;
 class World {
   constructor(o) {
@@ -21,17 +23,19 @@ class World {
     this.bld = {};
     this.armyLimit = o.armyLimit || ARMY_BASE;
     this.armyFull = false;
-    this.loadSection(o.lvl, o.sec, o.wallHp, o.bunkers);
+    this.loadSection(o.lvl, o.sec, o.wallHp, o.bunkers, o.barracks);
   }
   r() { return this.rng(); }
   slotList() { const a = []; for (const row of this.slots) for (const s of row) a.push(s); return a; }
   slotPos(s) { return { x: COLS_X[s.c], y: ROWS_Y[s.r] }; }
   // ---------- sections ----------
-  loadSection(lvl, sec, wallHp, bunkers) {
-    this.lvl = lvl; this.secIdx = sec; this.level = getLevel(lvl); this.sec = this.level.sections[sec]; this.scale = this.level.scale;
-    const max = Math.round(sectionMaxHp(lvl, sec) * this.scale);
-    this.wall = { kind: 'wall', team: 'e', armor: 'structure', hp: wallHp != null ? Math.min(wallHp, max) : max, maxHp: max, alive: true, x: W / 2, y: WALL_Y, r: 0, def: {}, hurt: 0 };
+  loadSection(lvl, sec, gateHp, bunkers, barracks) {
+    this.lvl = lvl; this.secIdx = sec; this.level = getLevel(lvl); this.sec = this.level.sections[sec]; this.scale = sectionScale(lvl, sec);
+    this.gateMax = Math.round(sectionMaxHp(lvl, sec) * this.scale);
+    this.gateHp0 = gateHp != null && gateHp > 0 ? Math.min(gateHp, this.gateMax) : this.gateMax;
     this.bunkerHp = bunkers && bunkers.length === (this.sec.bunkers || 0) ? bunkers.slice() : Array(this.sec.bunkers || 0).fill(ENEMIES.bunker.hp * this.scale);
+    this.barracksDef = sectionBarracks(this.sec);
+    this.barracksHp = barracks && barracks.length === this.barracksDef.length ? barracks.slice() : this.barracksDef.map(([k]) => barracksMaxHp(k, this.scale));
     for (const u of this.units) {
       if (u.team === 'e') { u.alive = false; this.fx.push({ type: 'puff', x: u.x, y: u.y, vx: 0, vy: -8, life: .8, max: .8, size: 4, c: 'smoke' }); }
       else if (u.phase === 'field' || u.phase === 'charge' || u.phase === 'retreat') u.alive = false;  // they took the old section
@@ -44,16 +48,32 @@ class World {
     for (const u of this.units) u.target = null;
     this.spawnStatics();
     this.cycle = this.sec.cycle || ENEMY_CYCLE;
+    this.enemyCountdown = this.cycle;
     this.nextEnemy = 3;
     this.enemyWaveNo = 0;
     this.breaching = false; this.breachT = 0;
   }
   spawnStatics() {
     const s = this.sec, sc = this.scale;
+    // the gate is the objective: this.wall points at it so the HUD and wall art follow its HP
+    const g = this.mk('e', 'gate', ENEMIES.gate, W / 2, WALL_Y + 4, sc, sc);
+    g.maxHp = this.gateMax; g.hp = this.gateHp0; g.face = Math.PI / 2;
+    this.wall = g;
+    this.barracks = [];
+    const nbk = this.barracksDef.length;
+    this.barracksDef.forEach(([k], i) => {
+      const x = ({ 1: [W / 2], 2: [W / 2 - 88, W / 2 + 88], 3: [64, W / 2, W - 64], 4: [48, 132, 228, 312] }[nbk] || [])[i] || 46 + i * 60;
+      const b = { i, k, x, y: BARRACKS_Y + (nbk > 2 && i % 2 ? 14 : 0), unit: null };
+      this.barracks.push(b);
+      if (!(this.barracksHp[i] > 0)) return;
+      const u = this.mk('e', 'ebarracks', ENEMIES.ebarracks, b.x, b.y, sc, sc);
+      u.maxHp = barracksMaxHp(k, sc); u.hp = this.barracksHp[i]; u.barracksIdx = i; u.trains = k; u.face = Math.PI / 2;
+      b.unit = u;
+    });
     const nb = s.bunkers || 0;
     for (let i = 0; i < nb; i++) {
       if (!(this.bunkerHp[i] > 0)) continue;
-      const x = nb === 1 ? W / 2 : 70 + i * (220 / (nb - 1));
+      const x = ({ 1: [85], 2: [72, W - 72], 3: [58, 118, W - 62] }[nb] || [])[i] || 70 + i * 60;   // keep clear of the gate
       const u = this.mk('e', 'bunker', ENEMIES.bunker, x, WALL_Y + 8, sc, sc);
       u.hp = this.bunkerHp[i]; u.maxHp = ENEMIES.bunker.hp * sc; u.bunkerIdx = i; u.face = Math.PI / 2;
     }
@@ -64,39 +84,46 @@ class World {
     for (let i = 0; i < ng; i++) this.posts.push({ k: 'gunman', x: 48 + (i + .5) * ((W - 96) / ng), y: WALL_Y - 5 });
     for (const p of this.posts) this.spawnPost(p);
   }
+  enemyPow(k) { return this.scale * (ENEMIES[k].vehicle ? Math.sqrt(ENEMY_POWER) : ENEMY_POWER); }
+  // strength multiplier for the troops the enemy barracks send: part fixed per section, part matched to our lineup
+  wavePow() {
+    let ours = 0;
+    for (const s of this.slotList()) if (s.type) { const d = UNITS[s.type]; ours += d.n * unitValue(d, lvMult(this.ulv[s.type] || 1)); }
+    let theirs = 0;
+    for (const [k, n] of this.barracksDef) theirs += (ENEMIES[k].vehicle ? n : Math.max(1, Math.round(n * ENEMY_MULT))) * unitValue(ENEMIES[k], 1);
+    const fixed = this.scale * ENEMY_POWER;
+    if (!ours || !theirs) return fixed * (this.lvl === 0 && EASY_START[this.secIdx] || 1);
+    const matched = Math.sqrt(MATCH) * ours / theirs;    // hp and damage both scale, so strength scales with its square
+    let g = this.secIdx; for (let i = 0; i < this.lvl; i++) g += getLevel(i).sections.length;
+    return Math.pow(fixed, 1 - ADAPT) * Math.pow(matched, ADAPT) * (EASY_START[g] || 1);
+  }
   spawnPost(p) {
-    const u = this.mk('e', p.k, ENEMIES[p.k], p.x, p.y, this.scale, this.scale);
+    const u = this.mk('e', p.k, ENEMIES[p.k], p.x, p.y, this.enemyPow(p.k), this.enemyPow(p.k));
     u.static = true; u.cover = true; u.onWall = true; u.rangeBonus = p.tower ? 10 : 25; u.tower = !!p.tower;
     p.unit = u;
   }
   enemyWave() {
     this.enemyWaveNo++;
     for (const p of this.posts) if (!p.unit || !p.unit.alive) this.spawnPost(p);
-    // the enemy has an army limit too, so unanswered waves don't pile up forever
-    const roaming = this.units.filter(u => u.team === 'e' && !u.static).length;
-    const size = (k, n) => ENEMIES[k].vehicle ? n : Math.max(1, Math.round(n * ENEMY_MULT));
-    const total = this.sec.field.reduce((a, [k, n]) => a + size(k, n), 0);
-    const cap = Math.ceil(total * ENEMY_CAP_WAVES);
-    const room = Math.min(total, cap - roaming);
-    if (room <= 0) return;
-    const f = room / total;
-    let row = 0;
-    for (const [k, n0] of this.sec.field) {
-      const n = Math.round(size(k, n0) * f);
-      if (n <= 0) continue;
-      let left = n;
-      while (left > 0) {
-        const inRow = Math.min(left, 7);
-        for (let i = 0; i < inRow; i++) {
-          const x = W / 2 + (i - (inRow - 1) / 2) * 34 + (this.r() - .5) * 8;
-          const y = WALL_FACE + 12 + row * 18 + this.r() * 4;
-          const u = this.mk('e', k, ENEMIES[k], x, y, this.scale, this.scale);
-          u.ewave = this.enemyWaveNo;
-        }
-        left -= inRow; row++;
+    let sent = 0;
+    this.ePow = this.wavePow();
+    for (const b of this.barracks) {
+      if (!b.unit || !b.unit.alive) continue;
+      const n0 = this.barracksDef[b.i][1];
+      const n = ENEMIES[b.k].vehicle ? n0 : Math.max(1, Math.round(n0 * ENEMY_MULT));
+      // each barracks keeps at most ENEMY_CAP_WAVES of its squads alive, so unanswered waves don't pile up forever
+      const alive = this.units.filter(u => u.alive && u.from === b.i).length;
+      const room = Math.min(n, Math.ceil(n * ENEMY_CAP_WAVES) - alive);
+      for (let j = 0; j < room; j++) {
+        const inRow = Math.min(room, 4), row = Math.floor(j / 4), col = j % 4;
+        const x = b.x + (col - (inRow - 1) / 2) * 15 + (this.r() - .5) * 6;
+        const y = b.y + b.unit.r + 10 + row * 13 + this.r() * 4;
+        const u = this.mk('e', b.k, ENEMIES[b.k], Math.max(10, Math.min(W - 10, x)), y, this.ePow, this.ePow);
+        u.ewave = this.enemyWaveNo; u.from = b.i;
+        sent++;
       }
     }
-    this.events.push('horn');
+    if (sent) this.events.push('horn');
   }
   // ---------- lineup edits (live) ----------
   setSlot(r, c, type) {
@@ -154,7 +181,12 @@ class World {
       if (s.status === 'walking' && s.units.every(u => !u.alive || u.arrived)) s.status = 'ready';
     }
     const req = list.filter(s => s.type);
-    if (req.length && req.every(s => s.status === 'ready')) this.launch(false);
+    this.holdLaunch = false;
+    if (req.length && req.every(s => s.status === 'ready')) {
+      // one wave at a time: wait until the last wave is mostly spent, so waves don't snowball
+      let size = 0; for (const s of req) for (const u of s.units) if (u.alive) size++;
+      if (this.fieldCount() <= size * STACK_MAX) this.launch(false); else this.holdLaunch = true;
+    }
   }
   deliver(s, k) {
     const def = UNITS[k], m = lvMult(this.ulv[k] || 1), bp = this.bldPos(k), p = this.slotPos(s);
@@ -209,6 +241,7 @@ class World {
     if (!this.breaching) {
       this.nextEnemy -= dt;
       if (this.nextEnemy <= 0) { this.enemyWave(); this.nextEnemy += this.cycle; }
+      this.enemyCountdown = this.nextEnemy;
     }
     this.production(dt);
     for (const u of this.units) if (u.alive) this.think(u, dt);
@@ -258,10 +291,7 @@ class World {
     return this.units.filter(f => f.alive && f.team === 'e');
   }
   range(u) { return u.def.range + u.rangeBonus; }
-  distTo(u, t) {
-    if (t.kind === 'wall') return u.y - WALL_FACE - u.r;
-    return dist(u, t) - t.r - u.r * .5;
-  }
+  distTo(u, t) { return dist(u, t) - t.r - u.r * .5; }
   inRange(u, t) { return this.distTo(u, t) <= this.range(u); }
   cluster(f, rad) {
     let n = 0;
@@ -271,7 +301,8 @@ class World {
   prio(u, f) {
     const ai = u.def.ai;
     if (u.team === 'p') {
-      if (f.kind === 'wall') return { std: 1, at: 8, blast: 6, ap: 0 }[ai] || 1;
+      if (f.def.gate) return { std: 1, at: 8, blast: 6, ap: 0 }[ai] || 1;
+      if (f.def.barracks) return { std: 3, at: 16, blast: 10, ap: 1 }[ai] || 3;
       if (f.def.structure) return { std: 2, at: 15, blast: 9, ap: 1 }[ai] || 2;
       if (ai === 'at') return f.vehicle ? 20 : f.armor === 'armored' ? 12 : 4;
       if (ai === 'blast') return (f.cover ? 13 : 8) + Math.min(5, this.cluster(f, u.def.splash)) * 1.5 - (f.def.melee ? 4 : 0);
@@ -283,7 +314,7 @@ class World {
     // enemies prefer troops already out on the field over ones still lining up
     return f.phase === 'field' ? 10 : 8;
   }
-  pickTarget(u, noWall) {
+  pickTarget(u) {
     const foes = this.foes(u);
     if (u.team === 'e') {
       let tb = null, td = 1e9;
@@ -305,10 +336,10 @@ class World {
       const s = this.prio(u, f) * 10 - d * .06 + (d <= R ? 100 : 0);
       if (s > bs) { bs = s; best = f; }
     }
-    if (u.team === 'p' && !noWall && u.def.ai !== 'medic' && !this.breaching) {
-      const d = this.distTo(u, this.wall);
-      const s = this.prio(u, this.wall) * 10 - d * .06 + (d <= R ? 100 : 0);
-      if (s > bs || !best) best = this.wall;
+    // nothing in sight: march on the nearest building (barracks stand in front, so they come first)
+    if (!best && u.team === 'p' && u.phase === 'field' && !this.breaching) {
+      let bd = 1e9;
+      for (const f of foes) if (f.def.structure) { const d = this.distTo(u, f); if (d < bd) { bd = d; best = f; } }
     }
     return best;
   }
@@ -343,32 +374,32 @@ class World {
         return;
       }
     }
+    if (d.structure && !d.dmg) return;   // gate and barracks don't shoot
     if (d.ai === 'medic') return this.medic(u, dt);
     if (u.state === 'run' || u.state === 'plant') return this.breacher(u, dt);
     u.retarget -= dt;
-    if (u.retarget <= 0 || !u.target || (u.target !== this.wall && (!u.target.alive || u.target.phase === 'retreat')) || (u.target === this.wall && this.breaching)) {
+    if (u.retarget <= 0 || !u.target || !u.target.alive || u.target.phase === 'retreat') {
       u.target = this.pickTarget(u); u.retarget = (d.melee ? .2 : .35) + this.r() * .15;
     }
     const t = u.target;
     if (t && this.inRange(u, t)) {
       if (u.wave) u.wave.contact = true;
       u.moving = false; u.idleT = 0;
-      const ax = t === this.wall ? u.x : t.x, ay = t === this.wall ? WALL_FACE : t.y;
-      u.face = Math.atan2(ay - u.y, ax - u.x);
+      u.face = Math.atan2(t.y - u.y, t.x - u.x);
       if (d.setup) { u.setupT += dt; if (u.setupT < d.setup) return; }
       if (u.cdT <= 0) { this.fire(u, t); u.cdT = d.cd * (.85 + this.r() * .3); }
       return;
     }
     if (u.static) return;
-    if (d.brace && u.team === 'p') {
+    if (d.brace && u.team === 'p' && u.y < FRONT_LINE + 10) {   // push out of the start area before bracing
       for (const f of this.units) if (f.alive && f.team !== u.team && !f.static && dist(f, u) < d.brace) { u.moving = false; u.face = Math.atan2(f.y - u.y, f.x - u.x); u.braced = true; return; }
       u.braced = false;
     }
     if (d.setup && u.setupT >= d.setup && u.idleT < 1.2) { u.idleT += dt; return; }
     let gx, gy;
     if (u.team === 'p') {
-      if (t && t !== this.wall) { gx = t.x; gy = t.y; }
-      else { gx = u.x; gy = WALL_FACE - 40; }
+      if (t) { gx = t.x; gy = t.y; }
+      else { gx = u.x; gy = BARRACKS_Y + 40; }
       gy = Math.max(gy, WALL_FACE + u.r + 2);
     } else {
       if (!t) {
@@ -376,7 +407,7 @@ class World {
         if (u.y < FRONT_LINE - 8) { this.moveTo(u, u.x, FRONT_LINE - 4 - (u.id % 5) * 7, dt, d.speed * .6); } else u.moving = false;
         return;
       }
-      gx = t.x; gy = Math.min(t.y, FRONT_LINE);
+      gx = t.x; gy = Math.min(t.y, CHASE_LINE);
     }
     this.moveTo(u, gx, gy, dt, this.speedOf(u));
     if (d.setup) u.setupT = 0;
@@ -419,14 +450,14 @@ class World {
   }
   breacher(u, dt) {
     if (this.breaching) { u.state = 'fight'; return; }
-    if (!u.goal || (u.goal !== this.wall && !u.goal.alive)) {
+    if (!u.goal || !u.goal.alive) {
       let best = null, bd = 1e9;
       for (const f of this.units) if (f.alive && f.team === 'e' && f.def.structure) { const d = dist(u, f); if (d < bd) { bd = d; best = f; } }
-      u.goal = best && Math.abs(best.x - u.x) < 140 ? best : this.wall;
-      if (u.goal === this.wall) u.gx = Math.max(20, Math.min(W - 20, u.x));
+      if (!best) { u.state = 'fight'; return; }
+      u.goal = best;
     }
     const g = u.goal;
-    const tx = g === this.wall ? u.gx : g.x, ty = g === this.wall ? WALL_FACE + u.r : g.y + g.r + u.r;
+    const tx = g.x, ty = g.y + g.r + u.r;
     if (u.state === 'run') {
       if (Math.hypot(tx - u.x, ty - u.y) >= 4) { this.moveTo(u, tx, ty, dt, u.def.speed); return; }
       u.state = 'plant'; u.plantT = 1.6; u.moving = false; u.face = -Math.PI / 2;
@@ -434,9 +465,8 @@ class World {
     }
     u.plantT -= dt;
     if (u.plantT <= 0) {
-      const target = g === this.wall || !g.alive ? this.wall : g;
-      this.applyDamage(target, u.charge, 'demo', u);
-      this.explode(tx, ty - 6, 34, 60, 'blast', u, target);
+      if (g.alive) this.applyDamage(g, u.charge, 'demo', u);
+      this.explode(tx, ty - 6, 34, 60, 'blast', u, g);
       this.boomFx(tx, ty - 6, 46, true);
       this.shake = Math.max(this.shake, .6); this.events.push('big');
       u.state = 'fight'; u.target = null;
@@ -445,8 +475,8 @@ class World {
   // ---------- combat ----------
   fire(u, t) {
     const d = u.def;
-    const tx = t === this.wall ? u.x + (this.r() - .5) * 10 : t.x;
-    const ty = t === this.wall ? WALL_FACE - 3 - this.r() * 6 : t.y;
+    const tx = t.x + (t.def.structure ? (this.r() - .5) * t.r : 0);
+    const ty = t.y + (t.def.structure ? (this.r() - .5) * t.r * .6 : 0);
     u.flash = .06;
     const mx = u.x + Math.cos(u.face) * u.r * 1.4, my = u.y + Math.sin(u.face) * u.r * 1.4;
     if (d.proj === 'rocket' || d.proj === 'cannon') {
@@ -471,13 +501,13 @@ class World {
   projStep(dt) {
     for (const p of this.proj) {
       if (p.type === 'rocket' || p.type === 'cannon') {
-        if (p.t !== this.wall && p.t && p.t.alive) { p.tx = p.t.x; p.ty = p.t.y; }
+        if (p.t && p.t.alive && !p.t.def.structure) { p.tx = p.t.x; p.ty = p.t.y; }
         const dx = p.tx - p.x, dy = p.ty - p.y, d = Math.hypot(dx, dy);
         const s = p.speed * dt;
         if (Math.random() < .7) this.fx.push({ type: 'puff', x: p.x, y: p.y, vx: 0, vy: 0, life: .5, max: .5, size: 2.5, c: 'smoke' });
         if (d <= s + 3) {
           p.dead = true;
-          const tgt = p.t === this.wall ? this.wall : (p.t && p.t.alive ? p.t : null);
+          const tgt = p.t && p.t.alive ? p.t : null;
           if (tgt) this.applyDamage(tgt, p.dmg, p.dtype, p.src);
           this.explode(p.tx, p.ty, p.splash || 12, p.dmg * .4, p.dtype, p.src, tgt);
           this.boomFx(p.tx, p.ty, (p.splash || 12) * 1.2, false);
@@ -507,14 +537,10 @@ class World {
       if (d > rad) continue;
       this.applyDamage(f, dmg * (1 - .5 * Math.max(0, d) / rad), dtype, src);
     }
-    if (team === 'p' && skip !== this.wall && Math.abs(y - WALL_Y) < rad + WALL_T / 2) {
-      const fall = 1 - .5 * Math.max(0, Math.abs(y - WALL_Y) - WALL_T / 2) / rad;
-      this.applyDamage(this.wall, dmg * fall, dtype, src);
-    }
   }
   applyDamage(t, dmg, dtype, src) {
-    if (!t || (t !== this.wall && !t.alive)) return;
-    if (t === this.wall && this.breaching) return;
+    if (!t || !t.alive) return;
+    if (t.def.structure && this.breaching) return;
     let m = MULT[dtype][t.armor];
     if (t.cover) m *= COVER[dtype];
     const d = dmg * m;
@@ -523,12 +549,14 @@ class World {
     if (!(t.hurtCd > 0)) { t.hurt = .07; t.hurtCd = .35; }
     if (src && src.wave) src.wave.contact = true;
     if (t.wave) t.wave.contact = true;
-    if (src && src.team === 'p' && (t === this.wall || t.def.structure)) {
+    if (t.def.barracks) this.barracksHp[t.barracksIdx] = Math.max(0, t.hp);
+    if (t.bunkerIdx != null) this.bunkerHp[t.bunkerIdx] = Math.max(0, t.hp);
+    if (src && src.team === 'p' && t.def.structure) {
       if (src.wave) src.wave.dmg += d;
-      this.cash += d * SIEGE_CASH / WALL_MULT;
-      if (d >= 15) this.texts.push({ x: (t === this.wall ? src.x : t.x) + (this.r() - .5) * 16, y: (t === this.wall ? WALL_Y : t.y) - 6, txt: '-' + Math.round(d), life: 1, max: 1, big: d >= 120 });
+      this.cash += d * STRUCT_CASH;
+      if (d >= 15) this.texts.push({ x: t.x + (this.r() - .5) * 16, y: t.y - t.r - 4, txt: '-' + Math.round(d), life: 1, max: 1, big: d >= 120 });
     }
-    if (t !== this.wall && t.hp <= 0) this.kill(t, src);
+    if (t.hp <= 0) this.kill(t, src);
   }
   kill(t, src, silent) {
     if (!t.alive) return;
@@ -537,10 +565,11 @@ class World {
       const b = (t.def.bounty || 3) * this.scale;
       this.cash += b;
       if (src && src.wave) src.wave.kills++;
-      if (t.def.structure) {
-        this.bunkerHp[t.bunkerIdx] = 0;
+      if (t.def.structure && !t.def.gate && !silent) {
         this.boomFx(t.x, t.y, 40, true); this.shake = Math.max(this.shake, .5); this.events.push('big');
-        this.texts.push({ x: t.x, y: t.y - 20, txt: 'BUNKER DOWN', life: 1.6, max: 1.6, big: true, cash: true });
+        const label = t.def.barracks ? 'BARRACKS DOWN' : 'BUNKER DOWN';
+        this.texts.push({ x: t.x, y: t.y - 20, txt: label, life: 1.6, max: 1.6, big: true, cash: true });
+        if (t.def.barracks) this.notes.push({ type: 'barracksDown', trains: t.trains, left: this.barracks.filter(b => b.unit && b.unit.alive).length });
       }
     } else if (t.wave) { t.wave.lost++; t.wave.alive--; }
     if (!t.def.structure) {
@@ -592,7 +621,7 @@ class World {
     for (const u of us) {
       if (u.onWall || u.def.structure) continue;
       u.x = Math.max(u.r, Math.min(W - u.r, u.x));
-      const maxY = u.team === 'e' ? FRONT_LINE : H + 40;
+      const maxY = u.team === 'e' ? CHASE_LINE : H + 40;
       u.y = Math.max(u.phase === 'charge' ? -60 : WALL_FACE + u.r, Math.min(maxY, u.y));
     }
   }

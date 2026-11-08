@@ -5,30 +5,42 @@ const ROWS_Y = [432, 466, 500];
 const COLS_X = [50, 137, 223, 310];
 const NROWS = 3, NCOLS = 4;
 const BASE_Y = 522;            // top of our base (barracks area)
-const FRONT_LINE = 350;        // enemy waves never push past this; the deployment area is safe
+const FRONT_LINE = 350;        // enemies wait here for our next wave
+const CHASE_LINE = 402;        // enemies chase a launched wave up to here; the deployment squares stay safe
 const ARMY_BASE = 40;
 const REPORT_T = 45;           // each wave's damage is reported over its first 45s so waves compare fairly
 const ENEMY_CYCLE = 16;        // default seconds between enemy waves
-const ENEMY_MULT = 1.25;          // multiplier on enemy wave sizes
+const ENEMY_MULT = 1.5;        // multiplier on enemy wave sizes (barracks squad counts in LEVELS)
 const TRAIN_MULT = 1.2;          // multiplier on our training times
 const ENEMY_CAP_WAVES = 1.6;   // the enemy keeps at most this many waves' worth of troops on the field
 const TRAIN = { rifle: 7, shield: 8, saw: 10, rpg: 10, gren: 10, jugg: 14, sniper: 10, medic: 8, breacher: 10, mortar: 12, humvee: 14 };
 const LINES = 2;               // squads each barracks can train at once
-const WALL_MULT = 22;          // tuned so a section takes ~3-6 min (Idle Siege lines take ~5 min; see analysis/FINDINGS.md)
-const SIEGE_CASH = .3;         // cash per point of wall damage = SIEGE_CASH / WALL_MULT, so a whole wall pays the same however tough it is
+// Each defense line: enemy barracks (each trains part of every enemy wave), gun emplacements, and a gate.
+// Knocking out a barracks shrinks every later enemy wave. Breaking the gate clears the line.
+const GATE_HP = 5600;          // gate HP x enemy scale (HQ gates x1.5)
+const ENEMY_POWER = 2;         // enemy troops' HP and damage multiplier (buildings excluded)
+const STACK_MAX = .5;          // a ready wave waits until the troops still fighting are at most this fraction of its size
+const ADAPT = .6;              // 0 = enemy waves fixed per section, 1 = always sized to your current lineup
+const MATCH = 1;               // adaptive part: enemy wave strength relative to your full wave (before counters)
+const EASY_START = [.6, .8];    // enemy troop strength on the very first sections, so a new player wins a clash early
+const ENEMY_GROWTH = 1.08;     // enemy HP and damage grow this much every section, to keep pace with upgrades
+const BARRACKS_HP = 2100;      // per barracks, x level scale (vehicle depots x1.4)
+const BARRACKS_Y = 158;        // barracks stand in the yard in front of the wall
+const STRUCT_CASH = .05;       // cash per point of damage dealt to buildings
 function trainTime(k, lv) { return TRAIN[k] * TRAIN_MULT * Math.max(.55, 1 - .04 * ((lv || 1) - 1)); }
 
 // damage type x armor class
 const MULT = {
-  bullet: { light: 1,   shield: .35, armored: .35, vehicle: .15, fort: .08, structure: .1 },
-  melee:  { light: 1,   shield: .3,  armored: .35, vehicle: .1,  fort: .1,  structure: .12 },
-  shred:  { light: 1,   shield: 2.2, armored: .6,  vehicle: .25, fort: .08, structure: .1 },
-  hmg:    { light: 1,   shield: .7,  armored: .7,  vehicle: .4,  fort: .2,  structure: .15 },
-  ap:     { light: 1,   shield: 1,   armored: 1.3, vehicle: .5,  fort: .15, structure: .1 },
-  at:     { light: .6,  shield: 1,   armored: 1.6, vehicle: 2.2, fort: 2.0, structure: 1.0 },
-  blast:  { light: 1.2, shield: .8,  armored: .7,  vehicle: .6,  fort: 1.1, structure: .8 },
-  demo:   { light: .5,  shield: .5,  armored: .5,  vehicle: 1.2, fort: 1.2, structure: 1.0 },
+  bullet: { light: 1,   shield: .35, armored: .35, vehicle: .15, fort: .08, structure: .1, building: 0.3 },
+  melee:  { light: 1,   shield: .3,  armored: .35, vehicle: .1,  fort: .1,  structure: .12, building: 0.2 },
+  shred:  { light: 1,   shield: 2.2, armored: .6,  vehicle: .25, fort: .08, structure: .1, building: 0.3 },
+  hmg:    { light: 1,   shield: .7,  armored: .7,  vehicle: .4,  fort: .2,  structure: .15, building: 0.4 },
+  ap:     { light: 1,   shield: 1,   armored: 1.3, vehicle: .5,  fort: .15, structure: .1, building: 0.3 },
+  at:     { light: .6,  shield: 1,   armored: 1.6, vehicle: 2.2, fort: 2.0, structure: 1.0, building: 1.3 },
+  blast:  { light: 1.2, shield: .8,  armored: .7,  vehicle: .6,  fort: 1.1, structure: .8, building: 1.0 },
+  demo:   { light: .5,  shield: .5,  armored: .5,  vehicle: 1.2, fort: 1.2, structure: 1.0, building: 1.2 },
 };
+// 'building' = barracks and gates: rifles chip them, rockets and explosives wreck them
 // multiplier when the target is behind cover (on the wall)
 const COVER = { bullet: .4, melee: .4, shred: .5, hmg: .55, ap: .75, at: .85, blast: 1, demo: 1 };
 
@@ -119,6 +131,10 @@ const ENEMIES = {
     tip: 'Massive armor and a big cannon. Lots of RPGs, C4, or a Juggernaut to distract it.' },
   erpg: { name: 'RPG Gunmen', hp: 55, armor: 'light', speed: 30, range: 165, dmg: 85, cd: 4.2, dtype: 'at', splash: 14, proj: 'rocket', ai: 'at', bounty: 6,
     tip: 'Hunt your vehicles and Juggernauts. A Sniper or Riflemen take them out fast.' },
+  ebarracks: { name: 'Barracks', hp: 1, armor: 'building', speed: 0, range: 0, dmg: 0, cd: 1, structure: true, barracks: true, size: 2.6, bounty: 60,
+    tip: 'Trains a squad for every enemy wave. Knock it down and every wave after is smaller. Rifles chip it; RPGs, Mortars and C4 wreck it.' },
+  gate: { name: 'Gate', hp: 1, armor: 'building', speed: 0, range: 0, dmg: 0, cd: 1, structure: true, gate: true, size: 3, bounty: 0,
+    tip: 'Break the gate to clear this line. Fewer barracks means more time to hit it.' },
   bunker: { name: 'MG Bunkers', hp: 1100, armor: 'fort', speed: 0, range: 160, dmg: 7, cd: .12, dtype: 'bullet', structure: true, size: 2.4, bounty: 80,
     tip: 'Concrete machine-gun nests that stay broken between waves. RPGs, Mortars or C4.' },
 };
@@ -149,7 +165,7 @@ const LEVELS = [
     { name: 'Dockside', wall: 'steel', hp: 7000, bunkers: 1, wallGuns: 4, field: [['erpg', 4], ['gunman', 6]], reinf: [14, [['erpg', 1], ['gunman', 2]]] },
     { name: 'Tank Yard', wall: 'steel', hp: 7600, wallGuns: 4, field: [['tank', 1], ['technical', 2], ['gunman', 4]], reinf: [16, [['technical', 1]]] },
     { name: 'Crane Line', wall: 'steel', hp: 8200, bunkers: 2, towers: 3, wallGuns: 2, field: [['heavy', 3], ['rusher', 8]], reinf: [14, [['rusher', 4]]] },
-    { name: 'Harbor HQ', wall: 'hq', hp: 10000, bunkers: 2, wallGuns: 5, field: [['tank', 1], ['heavy', 3], ['erpg', 3]], reinf: [15, [['erpg', 2]]] },
+    { name: 'Harbor HQ', wall: 'hq', hp: 10000, bunkers: 2, wallGuns: 4, field: [['tank', 1], ['heavy', 2], ['erpg', 2]], reinf: [15, [['erpg', 2]]] },
   ]},
   { name: 'Iron Citadel', theme: 'citadel', scale: 1.9, sections: [
     { name: 'Outer Ring', wall: 'steel', hp: 8000, bunkers: 3, towers: 2, wallGuns: 4, field: [['gunman', 6]], reinf: [13, [['gunman', 3]]] },
@@ -185,9 +201,28 @@ function getLevel(idx) {
   return { name: 'Operation ' + OP_NAMES[n % OP_NAMES.length] + (n >= OP_NAMES.length ? ' ' + (Math.floor(n / OP_NAMES.length) + 1) : ''),
     theme: THEMES[Math.floor(r() * THEMES.length)], scale: 1.9 + .25 * (n + 1), sections: secs, endless: true };
 }
+// which enemy squads each barracks trains: one barracks per field entry; a single big squad is split over two
+function sectionBarracks(s) {
+  if (s.barracks) return s.barracks;
+  const out = [];
+  for (const [k, n] of s.field) {
+    if (s.field.length === 1 && n >= 4 && !ENEMIES[k].vehicle) { const a = Math.ceil(n / 2); out.push([k, a], [k, n - a]); }
+    else out.push([k, n]);
+  }
+  return out;
+}
+// rough fighting strength of a group (Lanchester: grows with the square of numbers)
+function unitValue(def, m) { const dps = def.dmg ? def.dmg / def.cd : (def.heal || 0) / (def.cd || 1); return Math.sqrt(def.hp * m * Math.max(1, dps * m)); }
+function barracksMaxHp(k, scale) { return Math.round(BARRACKS_HP * scale * (ENEMIES[k].vehicle ? 1.4 : 1)); }
+// enemy strength for a section: grows every section across the campaign and into endless operations
+function sectionScale(levelIdx, secIdx) {
+  let g = secIdx;
+  for (let i = 0; i < levelIdx; i++) g += getLevel(i).sections.length;
+  return Math.pow(ENEMY_GROWTH, g);
+}
 function sectionMaxHp(levelIdx, secIdx) {
-  const L = getLevel(levelIdx);
-  return Math.round(L.sections[secIdx].hp * WALL_MULT);
+  const s = getLevel(levelIdx).sections[secIdx];
+  return Math.round(GATE_HP * (s.wall === 'hq' ? 1.5 : 1));
 }
 
 // unit unlocks: [unitKey, levelIdx, sectionsClearedInThatLevel] -> unlocked once progress passes it

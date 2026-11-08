@@ -14,17 +14,17 @@ function defaultState() {
   const open = [[false, false, false, false], [false, false, false, false], [false, false, false, false]];
   START_SLOTS.forEach(([r, c]) => open[r][c] = true);
   return {
-    v: 2, cash: 0, lvl: 0, sec: 0, wallHp: null, bunkers: null,
+    v: 3, cash: 0, lvl: 0, sec: 0, wallHp: null, bunkers: null, barracks: null,
     grid: [[null, 'rifle', 'rifle', null], [null, 'rifle', 'rifle', null], [null, null, null, null]],
     open, ulv: {}, armyLv: 0, waveNo: 0, hist: [], speed: 1, sound: true, notified: ['rifle', 'shield'], seenHow: false,
   };
 }
 function save() {
-  if (world) { S.wallHp = world.breaching ? 0 : world.wall.hp; S.bunkers = world.bunkerHp.slice(); S.waveNo = world.waveNo; }
+  if (world) { S.wallHp = world.breaching ? 0 : world.wall.hp; S.bunkers = world.bunkerHp.slice(); S.barracks = world.barracksHp.slice(); S.waveNo = world.waveNo; }
   try { localStorage.setItem(SAVE_KEY, JSON.stringify(S)); } catch (e) { /* storage unavailable */ }
 }
 function load(data) {
-  let s = data && data.v === 2 ? data : null;
+  let s = data && data.v >= 2 ? data : null;
   if (!s) { try { const raw = localStorage.getItem(SAVE_KEY); if (raw) s = JSON.parse(raw); } catch (e) { s = null; } }
   if (!s) {
     // carry progress over from the first version of the game
@@ -34,10 +34,12 @@ function load(data) {
     } catch (e) { s = null; }
   }
   S = Object.assign(defaultState(), s || {});
-  S.v = 2;
+  // v3 replaced the single wall with barracks + gate: old wall damage doesn't carry over
+  if (S.v < 3) { S.wallHp = null; S.bunkers = null; S.barracks = null; }
+  S.v = 3;
 }
 function makeWorld() {
-  world = new World({ lvl: S.lvl, sec: S.sec, wallHp: S.wallHp, bunkers: S.bunkers, grid: S.grid, ulv: S.ulv, waveNo: S.waveNo, armyLimit: ARMY_BASE + 10 * (S.armyLv || 0) });
+  world = new World({ lvl: S.lvl, sec: S.sec, wallHp: S.wallHp, bunkers: S.bunkers, barracks: S.barracks, grid: S.grid, ulv: S.ulv, waveNo: S.waveNo, armyLimit: ARMY_BASE + 10 * (S.armyLv || 0) });
 }
 function openCount() { let n = 0; S.open.forEach(r => r.forEach(o => { if (o) n++; })); return n; }
 function nextSlotCost() { const i = openCount() - START_SLOTS.length; return i < SLOT_COSTS.length ? SLOT_COSTS[i] : null; }
@@ -162,17 +164,20 @@ function handleNote(n) {
       cls = dd >= 0 ? 'good' : 'bad';
     }
     let how;
-    if (w.captured) how = 'broke through the wall';
+    if (w.captured) how = 'broke through the gate';
     else if (R.alive > 0) how = `${R.alive} still fighting`;
     else how = `wiped out after ${R.secs}s`;
-    let msg = `<b>Wave ${w.no}</b> · ${fmt(dmg)} siege damage${delta} · ${how}`;
+    let msg = `<b>Wave ${w.no}</b> · ${fmt(dmg)} building damage${delta} · ${how}`;
     if (!w.captured && dmg < 20 && R.alive <= 0) {
       const top = world.sec.field.slice().sort((a, c) => c[1] - a[1])[0];
-      if (top) msg += `<br>Nothing got through. ${ENEMIES[top[0]].name}: ${ENEMIES[top[0]].tip}`;
+      if (top) msg += `<br>Didn't reach the buildings. ${ENEMIES[top[0]].name}: ${ENEMIES[top[0]].tip}`;
       cls = 'bad';
     }
     feed(msg, cls, 5200);
     histT = 0;
+  } else if (n.type === 'barracksDown') {
+    feed(n.left ? `<b>Barracks down!</b> No more ${ENEMIES[n.trains].name} · ${n.left} left` : '<b>Last barracks down!</b> No more enemy waves. Hit the gate!', 'good', 4200);
+    renderIntel();
   } else if (n.type === 'breach') {
     const bonus = 150 * (n.lvl + 1) + (n.last ? 400 * (n.lvl + 1) : 0);
     S.cash += bonus;
@@ -235,8 +240,9 @@ function updateHud() {
   updateCash();
   const w = world.wall;
   $('#wallFill').style.width = (Math.max(0, w.hp) / w.maxHp * 100).toFixed(1) + '%';
-  $('#wallName').textContent = world.sec.name;
-  $('#wallHp').textContent = fmt(Math.max(0, w.hp)) + ' / ' + fmt(w.maxHp);
+  const bk = world.barracks.filter(b => b.unit && b.unit.alive).length;
+  $('#wallName').textContent = bk ? 'Gate · enemy wave in ' + Math.max(0, Math.ceil(world.enemyCountdown)) + 's' : 'Gate · no barracks left!';
+  $('#wallHp').textContent = fmt(Math.max(0, w.hp));
   const f = world.formingCount();
   $('#formLbl').textContent = 'Wave ' + (world.waveNo + 1) + ' forming';
   $('#formVal').textContent = f.total ? f.ready + '/' + f.total + ' squads ready' : 'Add squads';
@@ -246,6 +252,7 @@ function updateHud() {
   $('#armyBox').classList.toggle('full', world.armyFull);
   $('#armyLbl').textContent = world.armyFull ? 'Army full' : 'Army';
   if (world.armyFull && f.total) $('#formVal').textContent = 'Barracks waiting';
+  else if (world.holdLaunch) $('#formVal').textContent = 'Ready · holding';
   const last = S.hist.length ? S.hist[S.hist.length - 1] : null;
   const prev = S.hist.length > 1 ? S.hist[S.hist.length - 2] : null;
   $('#lastDmg').textContent = last ? fmt(last.d) : '–';
@@ -264,7 +271,13 @@ function intelList() {
   if (s.bunkers) list.push({ k: 'bunker', n: world.bunkerHp.filter(h => h > 0).length, of: s.bunkers });
   if (s.towers) list.push({ k: 'esniper', n: s.towers, label: 'Tower snipers', wall: true });
   if (s.wallGuns) list.push({ k: 'gunman', n: s.wallGuns, label: 'Wall gunmen', wall: true });
-  for (const [k, n] of s.field) list.push({ k, n, wave: true });
+  const bdef = world.barracksDef;
+  bdef.forEach(([k, n], i) => {
+    const up = world.barracksHp[i] > 0;
+    const shown = ENEMIES[k].vehicle ? n : Math.max(1, Math.round(n * ENEMY_MULT));
+    list.push({ k, n: shown, wave: true, down: !up });
+  });
+  if (bdef.length) list.unshift({ k: 'ebarracks', n: world.barracksHp.filter(h => h > 0).length, of: bdef.length });
   return list;
 }
 function renderIntel() {
@@ -276,7 +289,8 @@ function renderIntel() {
     b.className = 'chip' + (selectedIntel === i ? ' on' : '');
     b.type = 'button';
     const name = it.label || ENEMIES[it.k].name;
-    const count = it.k === 'bunker' ? it.n + '/' + it.of : '×' + it.n;
+    const count = it.of != null ? it.n + '/' + it.of : it.down ? '✕' : '×' + it.n;
+    if (it.down) b.style.opacity = '.45';
     b.innerHTML = `<img alt="" src="${unitIcon(it.k, 'e', 34)}"><span class="n">${count}</span><span class="nm">${name}</span>`;
     b.addEventListener('click', () => { selectedIntel = selectedIntel === i ? null : i; renderIntel(); });
     box.appendChild(b);
@@ -284,11 +298,14 @@ function renderIntel() {
   const tip = $('#intelTip');
   if (selectedIntel != null && list[selectedIntel]) {
     const it = list[selectedIntel];
-    const extra = it.wave ? ' They come out in every enemy wave.' : it.wall ? ' Replaced each enemy wave.' : '';
+    const extra = it.down ? ' Its barracks is destroyed: no more of these.' : it.wave ? ' One barracks trains these for every enemy wave.' : it.wall ? ' Replaced each enemy wave.' : '';
     tip.textContent = (it.label || ENEMIES[it.k].name) + ': ' + (it.k === 'gunman' && it.wall ? WALL_GUN_TIP : ENEMIES[it.k].tip) + extra;
   } else {
-    const mix = s.field.map(([k, n]) => n + ' ' + ENEMIES[k].name).join(' + ');
-    tip.textContent = 'Enemy waves every ' + (s.cycle || 20) + 's: ' + mix + '. Tap an enemy for how to beat it.';
+    const up = world.barracksDef.filter((b, i) => world.barracksHp[i] > 0);
+    const mix = up.map(([k, n]) => (ENEMIES[k].vehicle ? n : Math.max(1, Math.round(n * ENEMY_MULT))) + ' ' + ENEMIES[k].name).join(' + ');
+    tip.textContent = up.length
+      ? 'Every ' + world.cycle + 's the enemy barracks send ' + mix + '. Destroy a barracks to shrink every wave after. Tap an enemy for how to beat it.'
+      : 'All barracks are down: no more enemy waves. Smash the gate!';
   }
   $('#secTitle').textContent = (s.wall === 'hq' ? 'HQ' : 'Section ' + (world.secIdx + 1)) + ' · ' + s.name;
 }
@@ -517,9 +534,9 @@ function renderHist() {
     const avg = same.reduce((a, x) => a + x.d, 0) / same.length;
     const best = Math.max(...S.hist.filter(x => x.sec === world.sec.name).map(x => x.d));
     $('#est').innerHTML = avg > 0
-      ? `Best here <b>${fmt(best)}</b> · about <b>${Math.max(1, Math.ceil(Math.max(0, world.wall.hp) / avg))}</b> more waves at this pace`
-      : 'No damage yet on this wall. Try a different lineup.';
-  } else $('#est').textContent = 'Finished waves on this wall will show here.';
+      ? `Best here <b>${fmt(best)}</b> · about <b>${Math.max(1, Math.ceil(Math.max(0, world.wall.hp) / avg))}</b> more waves to break the gate at this pace`
+      : 'No building damage yet. Try a different lineup.';
+  } else $('#est').textContent = 'Finished waves on this line will show here.';
 }
 
 // ---------- misc ----------

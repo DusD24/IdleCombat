@@ -231,7 +231,7 @@ function drawUnit(ctx, u, t, opts) {
       ctx.strokeStyle = P ? PAL.pRing : PAL.eRing; ctx.globalAlpha = .75; ctx.lineWidth = 1.4; ctx.stroke(); ctx.globalAlpha = 1;
     }
   }
-  if (d.structure) { drawBunker(ctx, u, t); ctx.restore(); return; }
+  if (d.structure) { (d.barracks ? drawEBarracks : d.gate ? drawGate : drawBunker)(ctx, u, t); ctx.restore(); return; }
   ctx.rotate(u.face + Math.PI / 2);
   const hurt = u.hurt > 0;
   const uni = hurt ? '#fff' : P ? PAL.pUni : PAL.eUni;
@@ -381,9 +381,61 @@ function drawBunker(ctx, u, t) {
   if (f < .4) { ctx.beginPath(); ctx.moveTo(r * .6, -r * .5); ctx.lineTo(r * .3, -r * .1); ctx.lineTo(r * .5, r * .1); ctx.stroke();
     ctx.globalAlpha = .35; circ(ctx, Math.sin(t * 2) * 3, -r - (t * 10) % 10, 4, '#333'); ctx.globalAlpha = 1; }
 }
+// enemy barracks: trains part of every enemy wave. Vehicle depots get a garage door.
+function drawEBarracks(ctx, u, t) {
+  const r = u.r, f = Math.max(0, u.hp) / u.maxHp, hurt = u.hurt > 0;
+  const depot = u.trains && ENEMIES[u.trains] && ENEMIES[u.trains].vehicle;
+  const w = r * 2.2, h = r * 1.5;
+  // walls
+  ctx.fillStyle = hurt ? '#fff' : depot ? '#7d7f74' : '#9a8558'; rr(ctx, -w / 2, -h / 2, w, h, 3); ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,.35)'; ctx.lineWidth = 1; ctx.stroke();
+  // roof: two slopes in enemy red
+  ctx.fillStyle = hurt ? '#fff' : '#8e3b30'; ctx.fillRect(-w / 2 - 2, -h / 2 - 3, w + 4, h * .55);
+  ctx.fillStyle = 'rgba(0,0,0,.22)'; ctx.fillRect(-w / 2 - 2, -h / 2 - 3 + h * .27, w + 4, h * .28);
+  ctx.fillStyle = 'rgba(255,255,255,.12)'; ctx.fillRect(-w / 2 - 2, -h / 2 - 3, w + 4, 2);
+  // door facing our side
+  if (depot) {
+    ctx.fillStyle = '#3c3d37'; ctx.fillRect(-w * .32, h * .05, w * .64, h * .45);
+    ctx.strokeStyle = '#5b5d55'; ctx.lineWidth = .8;
+    for (let y = h * .12; y < h * .48; y += 3) { ctx.beginPath(); ctx.moveTo(-w * .32, y); ctx.lineTo(w * .32, y); ctx.stroke(); }
+  } else {
+    ctx.fillStyle = '#2b2620'; rr(ctx, -r * .32, h * .08, r * .64, h * .42, 2); ctx.fill();
+    ctx.fillStyle = '#d9c38a'; ctx.fillRect(-w * .42, h * .12, r * .3, r * .22); ctx.fillRect(w * .42 - r * .3, h * .12, r * .3, r * .22);
+  }
+  // little red banner so it reads as the enemy's
+  ctx.strokeStyle = '#333'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(w / 2 - 3, -h / 2 - 2); ctx.lineTo(w / 2 - 3, -h / 2 - 14); ctx.stroke();
+  ctx.fillStyle = PAL.eRing; ctx.beginPath(); ctx.moveTo(w / 2 - 3, -h / 2 - 14); ctx.lineTo(w / 2 + 7, -h / 2 - 11); ctx.lineTo(w / 2 - 3, -h / 2 - 8); ctx.fill();
+  // damage
+  ctx.strokeStyle = 'rgba(30,25,20,.7)'; ctx.lineWidth = 1;
+  if (f < .7) { ctx.beginPath(); ctx.moveTo(-w * .35, -h * .1); ctx.lineTo(-w * .15, h * .15); ctx.lineTo(-w * .25, h * .35); ctx.stroke(); }
+  if (f < .4) {
+    ctx.beginPath(); ctx.moveTo(w * .3, -h * .3); ctx.lineTo(w * .1, 0); ctx.lineTo(w * .25, h * .2); ctx.stroke();
+    ctx.fillStyle = 'rgba(20,18,15,.55)'; ctx.beginPath(); ctx.arc(-w * .18, -h * .25, r * .35, 0, Math.PI * 2); ctx.fill();
+    for (let i = 0; i < 2; i++) { ctx.globalAlpha = .35; circ(ctx, Math.sin(t * 2 + i) * 4 - w * .15, -h / 2 - 4 - ((t * 12 + i * 7) % 16), 4 + i, '#3a3530'); }
+    ctx.globalAlpha = 1;
+  }
+}
+// the gate in the wall: break it to clear the line
+function drawGate(ctx, u, t) {
+  const r = u.r, f = Math.max(0, u.hp) / u.maxHp, hurt = u.hurt > 0;
+  const w = r * 2.4, h = r * 1.15;
+  ctx.fillStyle = '#3d3a33'; ctx.fillRect(-w / 2 - 5, -h / 2 - 4, w + 10, h + 6);       // frame
+  ctx.fillStyle = hurt ? '#fff' : '#6b5638'; ctx.fillRect(-w / 2, -h / 2, w, h);           // doors
+  ctx.fillStyle = 'rgba(0,0,0,.35)'; ctx.fillRect(-1, -h / 2, 2, h);                         // seam
+  ctx.fillStyle = '#4a4740';
+  for (const y of [-h * .3, h * .2]) ctx.fillRect(-w / 2, y, w, 3);                        // steel bands
+  for (const x of [-w * .38, -w * .12, w * .12, w * .38]) circ(ctx, x, -h * .3 + 1.5, 1.2, '#8a877d');
+  if (f < .75) { ctx.strokeStyle = 'rgba(25,20,15,.8)'; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(-w * .3, -h * .5); ctx.lineTo(-w * .2, 0); ctx.lineTo(-w * .32, h * .4); ctx.stroke(); }
+  if (f < .5) { ctx.fillStyle = 'rgba(15,12,10,.8)'; ctx.beginPath(); ctx.ellipse(w * .15, h * .05, w * .14, h * .28, .3, 0, Math.PI * 2); ctx.fill(); }
+  if (f < .25) {
+    ctx.fillStyle = 'rgba(15,12,10,.85)'; ctx.beginPath(); ctx.ellipse(-w * .1, -h * .05, w * .2, h * .35, -.4, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = .4; circ(ctx, Math.sin(t * 2) * 4, -h / 2 - 6 - (t * 12) % 14, 5, '#3a3530'); ctx.globalAlpha = 1;
+  }
+}
 function drawHpBar(ctx, u) {
   if (u.hp >= u.maxHp - .5 && !u.def.structure) return;
-  const w = u.def.structure ? 30 : Math.max(10, u.r * 2), x = u.x - w / 2, y = u.y - u.r - (u.def.structure ? 12 : 6);
+  const w = u.def.gate ? 64 : u.def.barracks ? 40 : u.def.structure ? 30 : Math.max(10, u.r * 2), x = u.x - w / 2, y = u.y - u.r - (u.def.gate ? 4 : u.def.structure ? 12 : 6);
+  if (u.def.gate) { ctx.fillStyle = 'rgba(0,0,0,.6)'; ctx.fillRect(x - 1, y - 1, w + 2, 5); const f = Math.max(0, u.hp / u.maxHp); ctx.fillStyle = '#ff6a4e'; ctx.fillRect(x, y, w * f, 3); return; }
   ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillRect(x - .5, y - .5, w + 1, 3);
   const f = Math.max(0, u.hp / u.maxHp);
   ctx.fillStyle = u.team === 'p' ? '#6fd17c' : f > .5 ? '#ffb347' : '#ff5a4e';

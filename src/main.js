@@ -429,8 +429,13 @@ function slotTap(r, c) {
 }
 // opening a square: a clear confirm card (row, price, what comes next) that waits for an answer
 let buyOpener = null;
+// On touch screens the tap that opens a popup also fires a click a moment later, and that click lands on the
+// popup's own backdrop. Ignore backdrop taps right after a popup opens so it doesn't close itself.
+let popupAt = 0;
+function popupOpened() { popupAt = performance.now(); }
+function backdropOk() { return performance.now() - popupAt > 500; }
 function openBuy(r, c, cost) {
-  pendingBuy = [r, c]; renderGrid();
+  pendingBuy = [r, c]; renderGrid(); popupOpened();
   buyOpener = document.activeElement;
   const after = nextSlotCostAfter();
   $('#buyTitle').textContent = 'Open a ' + ROW_NAMES[r].toLowerCase() + ' row square?';
@@ -493,7 +498,7 @@ function playLevel(i) {
 $('#basesBtn').onclick = () => openBases(false);
 $('#basesClose').onclick = closeBases;
 $('#buyCancel').onclick = closeBuy;
-$('#buyCard').addEventListener('click', e => { if (e.target.id === 'buyCard') closeBuy(); });
+$('#buyCard').addEventListener('click', e => { if (e.target.id === 'buyCard' && backdropOk()) closeBuy(); });
 $('#buyOk').onclick = () => {
   if (!pendingBuy) return closeBuy();
   const [r, c] = pendingBuy, cost = nextSlotCost();
@@ -577,7 +582,7 @@ let sheetOpener = null, lineupOpener = null;
 function focusIn(el) { if (el) try { el.focus({ preventScroll: true }); } catch (e) { el.focus(); } }
 function openSheet(r, c) {
   sheetSlot = r == null ? null : [r, c];
-  sheetOpener = document.activeElement;
+  sheetOpener = document.activeElement; popupOpened();
   renderSheet();
   const sh = $('#sheet'); sh.hidden = false;
   requestAnimationFrame(() => { sh.classList.add('show'); focusIn($('#sheetClose')); });
@@ -658,7 +663,7 @@ function renderSheet() {
     toast(UNITS[k].name + ' upgraded to Lv ' + (lv + 1) + '. New squads get it.');
   });
 }
-function openLineup() { lineupOpener = document.activeElement; const sh = $('#lineupSheet'); sh.hidden = false; requestAnimationFrame(() => { sh.classList.add('show'); focusIn($('#lineupClose')); }); renderHist(); }
+function openLineup() { lineupOpener = document.activeElement; popupOpened(); const sh = $('#lineupSheet'); sh.hidden = false; requestAnimationFrame(() => { sh.classList.add('show'); focusIn($('#lineupClose')); }); renderHist(); }
 function closeLineup() {
   const sh = $('#lineupSheet'); sh.classList.remove('show'); setTimeout(() => { sh.hidden = true; }, 180);
   if (lineupOpener && document.contains(lineupOpener)) focusIn(lineupOpener);
@@ -720,9 +725,9 @@ $('#pauseBtn').onclick = () => { paused = !paused; updateTop(); updateHud(); sav
 $('#squadsBtn').onclick = () => openSheet(null);
 $('#lineupBtn').onclick = openLineup;
 $('#lineupClose').onclick = closeLineup;
-$('#lineupSheet').addEventListener('click', e => { if (e.target.id === 'lineupSheet') closeLineup(); });
+$('#lineupSheet').addEventListener('click', e => { if (e.target.id === 'lineupSheet' && backdropOk()) closeLineup(); });
 $('#sheetClose').onclick = closeSheet;
-$('#sheet').addEventListener('click', e => { if (e.target.id === 'sheet') closeSheet(); });
+$('#sheet').addEventListener('click', e => { if (e.target.id === 'sheet' && backdropOk()) closeSheet(); });
 $('#sndBtn').onclick = () => { S.sound = !S.sound; Snd.init(); save(); updateTop(); };
 $('#menuBtn').onclick = () => { $('#menu').hidden = !$('#menu').hidden; };
 $('#howBtn').onclick = () => { $('#menu').hidden = true; $('#how').hidden = false; };

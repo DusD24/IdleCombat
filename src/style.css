@@ -1,3 +1,8 @@
+/* Base rules the original claude.ai wrapper supplied; the layout depends on them. */
+:root { box-sizing: border-box; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+body { margin: 0; padding: 0; }
+img { max-width: 100%; }
+[hidden]:not([hidden=until-found i]) { display: none !important; }
 /* Layout: one-screen live game. Phone = battlefield + slim control bar, lineup opens as a sheet over the lower field; wide = battlefield + side panel. */
 :root {
   color-scheme: dark;

@@ -1,0 +1,51 @@
+plugins {
+    id 'com.android.application'
+}
+
+// Release signing comes from android/keystore.properties (git-ignored; back it up!).
+def ksFile = rootProject.file('keystore.properties')
+def ks = new Properties()
+if (ksFile.exists()) ks.load(new FileInputStream(ksFile))
+
+android {
+    namespace 'io.github.dusd24.breachsquad'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'io.github.dusd24.breachsquad'
+        minSdk 22          // Fire OS 5 and newer
+        targetSdk 34
+        versionCode 1
+        versionName '1.0.0'
+    }
+
+    signingConfigs {
+        release {
+            if (ksFile.exists()) {
+                storeFile rootProject.file(ks['storeFile'])
+                storePassword ks['storePassword']
+                keyAlias ks['keyAlias']
+                keyPassword ks['keyPassword']
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.release
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+}
+
+// Copy the built single-file game into the APK's assets before every build.
+def copyGame = tasks.register('copyGame', Copy) {
+    from rootProject.file('../dist/index.html')
+    into 'src/main/assets'
+}
+tasks.named('preBuild') { dependsOn copyGame }

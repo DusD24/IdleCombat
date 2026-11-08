@@ -6,3 +6,4 @@ node_modules/
 analysis/frames/
 analysis/sheets/
 HANDOFF.md
+store/*.apk

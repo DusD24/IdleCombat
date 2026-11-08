@@ -7,3 +7,4 @@ analysis/frames/
 analysis/sheets/
 HANDOFF.md
 store/*.apk
+.claude/

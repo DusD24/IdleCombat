@@ -2,10 +2,14 @@ package io.github.dusd24.breachsquad;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.content.pm.ApplicationInfo;
 import android.os.Build;
 import android.os.Bundle;
 import android.view.View;
 import android.view.WindowManager;
+import android.util.Log;
+import android.webkit.ConsoleMessage;
+import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
@@ -21,6 +25,8 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle state) {
         super.onCreate(state);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        final boolean debug = (getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0;
+        if (debug && Build.VERSION.SDK_INT >= 19) WebView.setWebContentsDebuggingEnabled(true);
         web = new WebView(this);
         web.setBackgroundColor(0xFF171A12);
         WebSettings s = web.getSettings();
@@ -42,6 +48,18 @@ public class MainActivity extends Activity {
             @SuppressWarnings("deprecation")
             public boolean shouldOverrideUrlLoading(WebView view, String url) {
                 return !url.startsWith(GAME_URL);
+            }
+
+            @Override
+            public void onPageFinished(WebView view, String url) {
+                if (debug) view.evaluateJavascript("window.BS_FPS=1", null);   // frame-rate log in logcat, debug builds only
+            }
+        });
+        if (debug) web.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public boolean onConsoleMessage(ConsoleMessage m) {
+                Log.i("BreachSquad", m.message() + " (" + m.sourceId() + ":" + m.lineNumber() + ")");
+                return true;
             }
         });
         setContentView(web);

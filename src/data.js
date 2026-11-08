@@ -1,12 +1,16 @@
 // ================= CORE CONSTANTS =================
-const W = 360, H = 600;
+const W = 360, H = 760;          // the field is deep: a no-man's-land between their yard and our squares
 const WALL_Y = 104, WALL_T = 20, WALL_FACE = WALL_Y + WALL_T / 2;
-const ROWS_Y = [432, 466, 500];
+const ROWS_Y = [592, 626, 660];
 const COLS_X = [50, 137, 223, 310];
 const NROWS = 3, NCOLS = 4;
-const BASE_Y = 522;            // top of our base (barracks area)
-const FRONT_LINE = 350;        // enemies wait here for our next wave
-const CHASE_LINE = 402;        // enemies chase a launched wave up to here; the deployment squares stay safe
+const BASE_Y = 682;            // top of our base (barracks area)
+const FRONT_LINE = 512;        // our launched shields push past this before bracing
+const GUARD_DEPTH = 34;        // enemy squads guard a spot this far in front of their barracks
+const AGGRO = 150;             // a guarding enemy reacts to attackers this close
+const LEASH = 320;             // once engaged, it fights anyone within this range
+const ALERT_R = 180;           // getting shot alerts squad-mates this close
+const CHASE_LINE = 360;        // enemies never chase past mid-field, so they can't crowd our squares
 const ARMY_BASE = 40;
 const REPORT_T = 45;           // each wave's damage is reported over its first 45s so waves compare fairly
 const ENEMY_CYCLE = 16;        // default seconds between enemy waves
@@ -17,14 +21,14 @@ const TRAIN = { rifle: 7, shield: 8, saw: 10, rpg: 10, gren: 10, jugg: 14, snipe
 const LINES = 2;               // squads each barracks can train at once
 // Each defense line: enemy barracks (each trains part of every enemy wave), gun emplacements, and a gate.
 // Knocking out a barracks shrinks every later enemy wave. Breaking the gate clears the line.
-const GATE_HP = 5600;          // gate HP x enemy scale (HQ gates x1.5)
+const GATE_HP = 4600;          // gate HP x enemy scale (HQ gates x1.5)
 const ENEMY_POWER = 2;         // enemy troops' HP and damage multiplier (buildings excluded)
 const STACK_MAX = .5;          // a ready wave waits until the troops still fighting are at most this fraction of its size
 const ADAPT = .6;              // 0 = enemy waves fixed per section, 1 = always sized to your current lineup
-const MATCH = 1;               // adaptive part: enemy wave strength relative to your full wave (before counters)
+const MATCH = 1.15;              // adaptive part: enemy wave strength relative to your full wave (before counters)
 const EASY_START = [.6, .8];    // enemy troop strength on the very first sections, so a new player wins a clash early
 const ENEMY_GROWTH = 1.08;     // enemy HP and damage grow this much every section, to keep pace with upgrades
-const BARRACKS_HP = 2100;      // per barracks, x level scale (vehicle depots x1.4)
+const BARRACKS_HP = 1800;      // per barracks, x level scale (vehicle depots x1.4)
 const BARRACKS_Y = 158;        // barracks stand in the yard in front of the wall
 const STRUCT_CASH = .05;       // cash per point of damage dealt to buildings
 function trainTime(k, lv) { return TRAIN[k] * TRAIN_MULT * Math.max(.55, 1 - .04 * ((lv || 1) - 1)); }
@@ -213,6 +217,16 @@ function sectionBarracks(s) {
 }
 // rough fighting strength of a group (Lanchester: grows with the square of numbers)
 function unitValue(def, m) { const dps = def.dmg ? def.dmg / def.cd : (def.heal || 0) / (def.cd || 1); return Math.sqrt(def.hp * m * Math.max(1, dps * m)); }
+// where a defense line's buildings stand (shared by the simulation and the 3D preview of lines ahead)
+function lineLayout(s) {
+  const bdef = sectionBarracks(s), nbk = bdef.length, nb = s.bunkers || 0;
+  return {
+    gate: { x: W / 2, y: WALL_Y + 4 },
+    barracks: bdef.map(([k], i) => ({ k, x: ({ 1: [W / 2], 2: [W / 2 - 88, W / 2 + 88], 3: [64, W / 2, W - 64], 4: [48, 132, 228, 312] }[nbk] || [])[i] || 46 + i * 60, y: BARRACKS_Y + (nbk > 2 && i % 2 ? 14 : 0) })),
+    bunkers: Array.from({ length: nb }, (_, i) => ({ x: ({ 1: [85], 2: [72, W - 72], 3: [58, 118, W - 62] }[nb] || [])[i] || 70 + i * 60, y: WALL_Y + 8 })),   // clear of the gate
+    towers: [24, W - 24, W / 2].slice(0, s.towers || 0).map(x => ({ x, y: WALL_Y - 8 })),
+  };
+}
 function barracksMaxHp(k, scale) { return Math.round(BARRACKS_HP * scale * (ENEMIES[k].vehicle ? 1.4 : 1)); }
 // enemy strength for a section: grows every section across the campaign and into endless operations
 function sectionScale(levelIdx, secIdx) {

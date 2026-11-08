@@ -93,6 +93,11 @@ document.addEventListener('pointerdown', () => Snd.init(), { once: false, passiv
 // ---------- canvas sizing ----------
 const cv = $('#cv'), ctx = cv.getContext('2d');
 let DPR = 1, SCALE = 1;
+// 3D battlefield when WebGL is available (add ?2d to the URL to force the flat renderer)
+let scene3d = null;
+try { if (R3 && R3.available() && !/[?&]2d\b/.test(location.search)) scene3d = new R3.Scene3D($('#gl')); } catch (e) { scene3d = null; }
+if (!scene3d) $('#gl').hidden = true;
+else scene3d.attachGestures(cv);   // pinch / scroll to zoom out over the whole base, drag to look along the road
 function isWide() { return window.matchMedia('(min-width: 900px)').matches; }
 function fit() {
   const stage = $('#stage');
@@ -102,6 +107,7 @@ function fit() {
   DPR = Math.min(2.5, window.devicePixelRatio || 1);
   cv.width = Math.floor(fw * DPR); cv.height = Math.floor(fh * DPR);
   cv.style.width = fw + 'px'; cv.style.height = fh + 'px';
+  if (scene3d) scene3d.resize(fw, fh, Math.min(DPR, 1.5));
   bgKey = ''; oldBg = null; fade = 0;
   placeLineup();
 }
@@ -133,7 +139,7 @@ function frame(ts) {
   world.notes.length = 0;
   if (world.cash) { S.cash += world.cash; world.cash = 0; }
   fade = Math.max(0, fade - dt * 1.2);
-  draw();
+  draw(dt);
   hudT -= dt; gridT -= dt; histT -= dt; saveT -= dt;
   if (hudT <= 0) { updateHud(); hudT = .1; }
   if (gridT <= 0) { updateGridLive(); gridT = .15; }
@@ -141,7 +147,13 @@ function frame(ts) {
   if (saveT <= 0) { save(); saveT = 3; }
   requestAnimationFrame(frame);
 }
-function draw() {
+function draw(dt) {
+  if (scene3d) {
+    scene3d.render(world, animT, { open: S.open, lockCost: nextSlotCost(), hover }, dt || 0);
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    scene3d.drawOverlay(ctx, world, animT);
+    return;
+  }
   ensureBg();
   ctx.setTransform(SCALE * DPR, 0, 0, SCALE * DPR, 0, 0);
   ctx.clearRect(0, 0, W, H);
@@ -418,8 +430,9 @@ function slotTap(r, c) {
 })();
 // tap a deployment square right on the battlefield
 function slotAt(e) {
-  const rect = cv.getBoundingClientRect();
-  const lx = (e.clientX - rect.left) / SCALE, ly = (e.clientY - rect.top) / SCALE;
+  let lx, ly;
+  if (scene3d) { const p = scene3d.pick(e.clientX, e.clientY); if (!p) return null; lx = p.x; ly = p.y; }
+  else { const rect = cv.getBoundingClientRect(); lx = (e.clientX - rect.left) / SCALE; ly = (e.clientY - rect.top) / SCALE; }
   for (let r = 0; r < NROWS; r++) for (let c = 0; c < NCOLS; c++) if (Math.abs(lx - COLS_X[c]) <= 41 && Math.abs(ly - ROWS_Y[r]) <= 16) return [r, c];
   return null;
 }

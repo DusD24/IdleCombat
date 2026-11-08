@@ -54,35 +54,40 @@ class World {
     this.breaching = false; this.breachT = 0;
   }
   spawnStatics() {
-    const s = this.sec, sc = this.scale;
+    const s = this.sec, sc = this.scale, L = lineLayout(s);
     // the gate is the objective: this.wall points at it so the HUD and wall art follow its HP
-    const g = this.mk('e', 'gate', ENEMIES.gate, W / 2, WALL_Y + 4, sc, sc);
+    const g = this.mk('e', 'gate', ENEMIES.gate, L.gate.x, L.gate.y, sc, sc);
     g.maxHp = this.gateMax; g.hp = this.gateHp0; g.face = Math.PI / 2;
     this.wall = g;
     this.barracks = [];
-    const nbk = this.barracksDef.length;
     this.barracksDef.forEach(([k], i) => {
-      const x = ({ 1: [W / 2], 2: [W / 2 - 88, W / 2 + 88], 3: [64, W / 2, W - 64], 4: [48, 132, 228, 312] }[nbk] || [])[i] || 46 + i * 60;
-      const b = { i, k, x, y: BARRACKS_Y + (nbk > 2 && i % 2 ? 14 : 0), unit: null };
+      const b = { i, k, x: L.barracks[i].x, y: L.barracks[i].y, unit: null };
       this.barracks.push(b);
       if (!(this.barracksHp[i] > 0)) return;
       const u = this.mk('e', 'ebarracks', ENEMIES.ebarracks, b.x, b.y, sc, sc);
       u.maxHp = barracksMaxHp(k, sc); u.hp = this.barracksHp[i]; u.barracksIdx = i; u.trains = k; u.face = Math.PI / 2;
       b.unit = u;
     });
-    const nb = s.bunkers || 0;
-    for (let i = 0; i < nb; i++) {
-      if (!(this.bunkerHp[i] > 0)) continue;
-      const x = ({ 1: [85], 2: [72, W - 72], 3: [58, 118, W - 62] }[nb] || [])[i] || 70 + i * 60;   // keep clear of the gate
-      const u = this.mk('e', 'bunker', ENEMIES.bunker, x, WALL_Y + 8, sc, sc);
+    L.bunkers.forEach((p, i) => {
+      if (!(this.bunkerHp[i] > 0)) return;
+      const u = this.mk('e', 'bunker', ENEMIES.bunker, p.x, p.y, sc, sc);
       u.hp = this.bunkerHp[i]; u.maxHp = ENEMIES.bunker.hp * sc; u.bunkerIdx = i; u.face = Math.PI / 2;
-    }
+    });
     this.posts = [];
-    const towersX = [24, W - 24, W / 2];
-    for (let i = 0; i < (s.towers || 0); i++) this.posts.push({ k: 'esniper', x: towersX[i], y: WALL_Y - 8, tower: true });
+    for (const t of L.towers) this.posts.push({ k: 'esniper', x: t.x, y: t.y, tower: true });
     const ng = s.wallGuns || 0;
     for (let i = 0; i < ng; i++) this.posts.push({ k: 'gunman', x: 48 + (i + .5) * ((W - 96) / ng), y: WALL_Y - 5 });
     for (const p of this.posts) this.spawnPost(p);
+  }
+  // each defender gets its own spot in a block formation in front of its barracks, so idle squads don't jostle
+  guardSpot(u, b) {
+    const used = new Set();
+    for (const o of this.units) if (o.alive && o !== u && o.from === b.i && o.guardIdx != null) used.add(o.guardIdx);
+    let i = 0; while (used.has(i)) i++;
+    u.guardIdx = i;
+    const gap = Math.max(17, u.r * 2.4), perRow = 4, row = Math.floor(i / perRow), col = i % perRow;
+    u.homeX = Math.max(12, Math.min(W - 12, b.x + (col - (perRow - 1) / 2) * gap));
+    u.homeY = b.y + b.unit.r + GUARD_DEPTH + row * gap;
   }
   enemyPow(k) { return this.scale * (ENEMIES[k].vehicle ? Math.sqrt(ENEMY_POWER) : ENEMY_POWER); }
   // strength multiplier for the troops the enemy barracks send: part fixed per section, part matched to our lineup
@@ -120,6 +125,7 @@ class World {
         const y = b.y + b.unit.r + 10 + row * 13 + this.r() * 4;
         const u = this.mk('e', b.k, ENEMIES[b.k], Math.max(10, Math.min(W - 10, x)), y, this.ePow, this.ePow);
         u.ewave = this.enemyWaveNo; u.from = b.i;
+        this.guardSpot(u, b);
         sent++;
       }
     }
@@ -328,7 +334,7 @@ class World {
     }
     let best = null, bs = -1e9;
     const R = this.range(u);
-    const sight = u.team === 'p' ? (u.phase === 'field' ? Math.max(R + 70, 190) : R) : (u.static ? R : 1e9);
+    const sight = u.team === 'p' ? (u.phase === 'field' ? Math.max(R + 70, 190) : R) : (u.static ? R : u.engaged ? LEASH : Math.max(R, AGGRO));
     for (const f of foes) {
       const d = this.distTo(u, f);
       if (d > sight) continue;
@@ -347,8 +353,24 @@ class World {
     const dx = tx - u.x, dy = ty - u.y, d = Math.hypot(dx, dy);
     if (d < 1) { u.moving = false; return true; }
     const sp = Math.min(d, speed * dt);
-    u.x += dx / d * sp; u.y += dy / d * sp;
-    u.face = Math.atan2(dy, dx);
+    let mx = dx / d, my = dy / d;
+    // walk around teammates who are standing still (setting up, firing) instead of shoving through them
+    if (!u.static && u.phase !== 'walk') {
+      let sx = 0, sy = 0;
+      for (const o of this.units) {
+        if (o === u || !o.alive || o.team !== u.team || o.moving || o.static || o.phase === 'queue') continue;
+        const ox = o.x - u.x, oy = o.y - u.y, od = Math.hypot(ox, oy), reach = (u.r + o.r) * 2.4;
+        if (od > reach || od < .01) continue;
+        const ahead = (ox * mx + oy * my) / od;
+        if (ahead < .2) continue;
+        const side = (mx * oy - my * ox) > 0 ? -1 : 1;           // pass on the side away from them
+        const w = ahead * (1 - od / reach);
+        sx += -my * side * w; sy += mx * side * w;
+      }
+      if (sx || sy) { mx += sx * 1.6; my += sy * 1.6; const n = Math.hypot(mx, my) || 1; mx /= n; my /= n; }
+    }
+    u.x += mx * sp; u.y += my * sp;
+    u.face = Math.atan2(my, mx);
     u.moving = true; u.walk += sp * .35;
     return false;
   }
@@ -392,7 +414,7 @@ class World {
     }
     if (u.static) return;
     if (d.brace && u.team === 'p' && u.y < FRONT_LINE + 10) {   // push out of the start area before bracing
-      for (const f of this.units) if (f.alive && f.team !== u.team && !f.static && dist(f, u) < d.brace) { u.moving = false; u.face = Math.atan2(f.y - u.y, f.x - u.x); u.braced = true; return; }
+      for (const f of this.units) if (f.alive && f.team !== u.team && !f.static && f.engaged && dist(f, u) < d.brace) { u.moving = false; u.face = Math.atan2(f.y - u.y, f.x - u.x); u.braced = true; return; }
       u.braced = false;
     }
     if (d.setup && u.setupT >= d.setup && u.idleT < 1.2) { u.idleT += dt; return; }
@@ -403,10 +425,13 @@ class World {
       gy = Math.max(gy, WALL_FACE + u.r + 2);
     } else {
       if (!t) {
-        // no attackers on the field: hold the front line and wait
-        if (u.y < FRONT_LINE - 8) { this.moveTo(u, u.x, FRONT_LINE - 4 - (u.id % 5) * 7, dt, d.speed * .6); } else u.moving = false;
+        // nobody close: fall back to the guard post and wait for attackers to come to us
+        u.engaged = false;
+        const hx = u.homeX != null ? u.homeX : u.x, hy = u.homeY != null ? u.homeY : u.y;
+        if (Math.hypot(hx - u.x, hy - u.y) > (u.moving ? 1.5 : 6)) this.moveTo(u, hx, hy, dt, d.speed * .7); else { u.moving = false; u.face = Math.PI / 2; }
         return;
       }
+      u.engaged = true;
       gx = t.x; gy = Math.min(t.y, CHASE_LINE);
     }
     this.moveTo(u, gx, gy, dt, this.speedOf(u));
@@ -549,6 +574,7 @@ class World {
     if (!(t.hurtCd > 0)) { t.hurt = .07; t.hurtCd = .35; }
     if (src && src.wave) src.wave.contact = true;
     if (t.wave) t.wave.contact = true;
+    if (t.team === 'e' && !t.static && !t.engaged && src) this.alert(t);
     if (t.def.barracks) this.barracksHp[t.barracksIdx] = Math.max(0, t.hp);
     if (t.bunkerIdx != null) this.bunkerHp[t.bunkerIdx] = Math.max(0, t.hp);
     if (src && src.team === 'p' && t.def.structure) {
@@ -557,6 +583,11 @@ class World {
       if (d >= 15) this.texts.push({ x: t.x + (this.r() - .5) * 16, y: t.y - t.r - 4, txt: '-' + Math.round(d), life: 1, max: 1, big: d >= 120 });
     }
     if (t.hp <= 0) this.kill(t, src);
+  }
+  // a defender under fire wakes up, and so do squad-mates standing near it
+  alert(t) {
+    t.engaged = true; t.retarget = 0;
+    for (const o of this.units) if (o.alive && o.team === 'e' && !o.static && !o.engaged && dist(o, t) < ALERT_R) { o.engaged = true; o.retarget = 0; }
   }
   kill(t, src, silent) {
     if (!t.alive) return;
@@ -610,7 +641,9 @@ class World {
         const ma = pin(a) && !(pin(b)) ? 0 : 1 / ((a.def.size || 1) * (a.vehicle ? 3 : 1) * (a.def.taunt ? 2 : 1));
         const mb = pin(b) && !(pin(a)) ? 0 : 1 / ((b.def.size || 1) * (b.vehicle ? 3 : 1) * (b.def.taunt ? 2 : 1));
         if (a.static) { if (b.static) continue; }
-        const wa = a.static ? 0 : ma, wb = b.static ? 0 : mb;
+        let wa = a.static ? 0 : ma, wb = b.static ? 0 : mb;
+        // between teammates, whoever is moving gives way to whoever is holding position
+        if (a.team === b.team && a.moving !== b.moving) { if (a.moving) wb = 0; else wa = 0; }
         if (wa + wb === 0) continue;
         if ((a.phase === 'walk' || b.phase === 'walk') && a.team === b.team) continue;
         const push = (rr - d) / (wa + wb);

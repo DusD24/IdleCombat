@@ -11,7 +11,8 @@ from pathlib import Path
 ROOT = Path(__file__).parent
 SRC = ROOT / "src"
 DIST = ROOT / "dist"
-JS_ORDER = ["data.js", "world.js", "render.js", "render_world.js", "main.js"]
+JS_ORDER = ["data.js", "world.js", "render.js", "render_world.js", "render3d.js", "main.js"]
+VENDOR = ["vendor/three.min.js"]  # three.js r149 (MIT, see src/vendor/three.LICENSE)
 
 def read(name):
     return (SRC / name).read_text()
@@ -32,7 +33,8 @@ def build():
     js = "'use strict';\n" + "".join(read(n) for n in JS_ORDER)
     fonts = "<style>\n" + inline_fonts() + "</style>"
     head = read("head.html").replace("<!--FONTS-->", fonts).replace("/*CSS*/", read("style.css").rstrip("\n"))
-    html = head + "\n" + read("body.html") + "\n<script>\n" + js + "</script>\n</body>\n</html>\n"
+    vendor = "".join("<script>\n" + read(v) + "\n</script>\n" for v in VENDOR)
+    html = head + "\n" + read("body.html") + "\n" + vendor + "<script>\n" + js + "</script>\n</body>\n</html>\n"
     DIST.mkdir(exist_ok=True)
     (DIST / "index.html").write_text(html)
     (DIST / "bundle_check.js").write_text(js)

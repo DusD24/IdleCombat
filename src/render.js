@@ -4,6 +4,11 @@ const PAL = {
   eUni: '#6e5543', eUniD: '#47362a', eWrap: '#c4463a', eRing: '#ff5a4e',
   gun: '#23251f', metal: '#3a3d36', shield: '#b7cde0', hazard: '#f2b632',
 };
+// helmet colour per squad type, shared by the 3D battlefield and the 2D icons so the lineup matches the field
+const TYPE_HELM = {
+  rifle: '#5b6838', shield: '#2f6fb0', saw: '#d39a2a', rpg: '#b8402c', gren: '#7b52b8', jugg: '#2b2b2b',
+  sniper: '#86a33a', medic: '#f4f1e8', breacher: '#e2742a', mortar: '#7a5534', humvee: '#5b6838',
+};
 const THEME_COL = {
   sand:     { g: '#d9c28f', g2: '#cbb07a', road: '#c7a76e', base: '#b39466', speck: '#bfa572', tuft: '#9c9a5a' },
   village:  { g: '#bdb97f', g2: '#aaa86b', road: '#c9ae80', base: '#9c8f66', speck: '#a7a36c', tuft: '#7e8a45' },
@@ -32,7 +37,8 @@ function circ(ctx, x, y, r, fill, stroke, lw) {
 function ell(ctx, x, y, rx, ry, fill) { ctx.beginPath(); ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2); ctx.fillStyle = fill; ctx.fill(); }
 
 // ---------- background (cached per section) ----------
-function buildBackground(theme, secDef, scale) {
+// ground3d: paint only the ground (the 3D renderer builds props, buildings, berm and flags itself)
+function buildBackground(theme, secDef, scale, ground3d) {
   const c = document.createElement('canvas');
   c.width = W * scale; c.height = H * scale;
   const ctx = c.getContext('2d'); ctx.scale(scale, scale);
@@ -81,7 +87,7 @@ function buildBackground(theme, secDef, scale) {
   for (let i = 0; i < 80; i++) { ctx.fillStyle = 'rgba(0,0,0,.08)'; ctx.fillRect(rnd() * W, rnd() * WALL_Y, 2, 2); }
   const isHQ = secDef.wall === 'hq';
   // tents / huts / crates
-  const props = isHQ ? 3 : 5;
+  const props = ground3d ? 0 : isHQ ? 3 : 5;
   for (let i = 0; i < props; i++) {
     const x = 20 + rnd() * (W - 40), y = 14 + rnd() * 52;
     if (isHQ && Math.abs(x - W / 2) < 80) continue;
@@ -94,7 +100,7 @@ function buildBackground(theme, secDef, scale) {
       ctx.beginPath(); ctx.moveTo(x - 6, y - 6); ctx.lineTo(x + 6, y + 6); ctx.stroke();
     }
   }
-  if (isHQ) {
+  if (ground3d) { /* 3D props */ } else if (isHQ) {
     // command building
     const bx = W / 2 - 54, by = 14, bw = 108, bh = 60;
     ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.fillRect(bx + 5, by + 6, bw, bh);
@@ -117,6 +123,7 @@ function buildBackground(theme, secDef, scale) {
   ctx.fillStyle = 'rgba(40,50,25,.10)'; ctx.fillRect(0, ROWS_Y[0] - 24, W, BASE_Y - ROWS_Y[0] + 24);
   ctx.fillStyle = theme === 'citadel' || theme === 'harbor' ? '#7b7a6c' : '#a8956a'; ctx.fillRect(0, BASE_Y, W, H - BASE_Y);
   for (let i = 0; i < 120; i++) { ctx.fillStyle = 'rgba(0,0,0,.07)'; ctx.fillRect(rnd() * W, BASE_Y + rnd() * (H - BASE_Y), 2, 2); }
+  if (ground3d) return c;
   // sandbag berm along the base edge (gap in the middle for the road)
   for (let x = 4; x < W; x += 11) {
     if (Math.abs(x - W / 2) < 26) continue;
@@ -236,7 +243,7 @@ function drawUnit(ctx, u, t, opts) {
   const hurt = u.hurt > 0;
   const uni = hurt ? '#fff' : P ? PAL.pUni : PAL.eUni;
   const uniD = P ? PAL.pUniD : PAL.eUniD;
-  const helm = hurt ? '#fff' : P ? PAL.pHelm : PAL.eWrap;
+  const helm = hurt ? '#fff' : P ? (TYPE_HELM[k] || PAL.pHelm) : PAL.eWrap;
   const step = u.moving ? Math.sin(u.walk) : 0;
 
   if (u.vehicle) { drawVehicle(ctx, u, t, P, hurt); ctx.restore(); return; }
@@ -304,7 +311,7 @@ function drawUnit(ctx, u, t, opts) {
     if (big && !hurt) { ctx.fillStyle = k === 'jugg' ? '#3f4a2c' : '#3b3b3b'; rr(ctx, -r * .7, -r * .35, r * 1.4, r * .55, 3); ctx.fill(); ctx.strokeStyle = 'rgba(255,255,255,.12)'; ctx.stroke(); }
     // head
     const hr = r * (big ? .52 : .5);
-    const hc = hurt ? '#fff' : k === 'medic' ? '#e2ddcf' : k === 'jugg' ? '#2f3824' : k === 'heavy' ? '#2e2e2e' : k === 'rusher' ? '#c7553f' : helm;
+    const hc = hurt ? '#fff' :  k === 'heavy' ? '#2e2e2e' : k === 'rusher' ? '#c7553f' : helm;
     circ(ctx, 0, -r * .05, hr, hc, 'rgba(0,0,0,.4)', .8);
     if (!hurt) {
       if (k === 'jugg') { ctx.fillStyle = '#8fd3ff'; ctx.fillRect(-hr * .6, -r * .05 - hr * .85, hr * 1.2, hr * .32); }

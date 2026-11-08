@@ -19,7 +19,8 @@ node tools/pace.js 0 0 start 1       # probe one section: level, section, lineup
 |---|---|
 | `src/data.js` | Tuning constants, units, enemies, levels, unlocks, costs |
 | `src/world.js` | Simulation: production, waves, combat, breach |
-| `src/render*.js` | Canvas drawing |
+| `src/render3d.js` | Low-poly 3D battlefield (three.js r149, vendored in `src/vendor/`, MIT). Add `?2d` to the URL for the flat renderer, `?fps` to log frame rate |
+| `src/render.js`, `render_world.js` | 2D drawing: the fallback renderer, plus the ground texture, deploy squares and UI icons the 3D view reuses |
 | `src/main.js` | UI, game loop, save/load, audio |
 | `src/head.html`, `body.html`, `style.css` | Page shell and layout |
 | `tools/` | Pacing sims and footage-analysis helpers |
